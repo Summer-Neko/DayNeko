@@ -1,0 +1,12 @@
+node_modules/
+dist/
+data/
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-shm
+*.db-wal
+*.log
+target/
+src-tauri/target/
