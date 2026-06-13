@@ -2,6 +2,19 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default DayNeko desktop permissions",
-  "windows": ["main"],
-  "permissions": ["core:default", "opener:default", "autostart:default"]
+  "windows": ["main", "update-prompt"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-show",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus",
+    "opener:default",
+    "autostart:default",
+    "process:default"
+  ]
 }

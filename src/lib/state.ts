@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { normalizeActivityEntries } from "./activity";
-import { defaultDataPath, defaultServerUrl, legacyKeys, storageKey } from "./config";
+import { defaultDataPath, defaultServerUrl } from "./config";
 import { nowIso, todayKey } from "./date";
 import type { AppState, FriendRating, Rank } from "../types";
 
@@ -31,7 +31,13 @@ export function initialState(): AppState {
       accentColor: "#c9a5a5",
       dataPath: defaultDataPath,
       backgroundBrightness: 86,
-      syncIntervalSeconds: 60
+      cardOpacity: 74,
+      cardBlur: 18,
+      cardShadow: 11,
+      syncIntervalSeconds: 60,
+      autoDiscoverServer: true,
+      autoCheckUpdate: true,
+      autoDownloadUpdate: true
     },
     dirtyQueue: [],
     boots: [],
@@ -61,7 +67,7 @@ export function migrateState(raw: string): AppState {
       ...activity,
       updatedAt: activity.updatedAt ?? activity.startedAt
     }))),
-    events:
+    events: (
       parsed.events ??
       (parsed.schedules ?? []).map((schedule) => ({
         id: schedule.id,
@@ -74,7 +80,14 @@ export function migrateState(raw: string): AppState {
         evidence: [],
         createdAt: nowIso(),
         updatedAt: nowIso()
-      })),
+      }))
+    ).map((event) => ({
+      ...event,
+      evidence: event.evidence.map((image) => ({
+        ...image,
+        dataUrl: image.filePath && !image.dataUrl.startsWith("data:") ? convertFileSrc(image.filePath) : image.dataUrl
+      }))
+    })),
     friends: (parsed.friends ?? base.friends).map((friend) => ({
       ...friend,
       updatedAt: friend.updatedAt ?? friend.lastSeen
@@ -97,21 +110,59 @@ export function migrateState(raw: string): AppState {
 }
 
 export function loadState(): AppState {
-  const raw = localStorage.getItem(storageKey) ?? legacyKeys.map((key) => localStorage.getItem(key)).find(Boolean);
-  if (!raw) return initialState();
+  return initialState();
+}
+
+export async function loadStoredState(dataPath = ""): Promise<AppState | null> {
   try {
-    return migrateState(raw);
+    const raw = await invoke<string | null>("load_local_state", { dataDir: dataPath });
+    return raw ? migrateState(raw) : null;
   } catch {
-    return initialState();
+    return null;
   }
 }
 
+function stateForPersistence(state: AppState): Partial<AppState> {
+  const compactEvent = (event: AppState["events"][number]) => ({
+    ...event,
+    evidence: event.evidence.map((image) => ({
+      ...image,
+      dataUrl: image.filePath ? "" : image.dataUrl
+    }))
+  });
+
+  return {
+    ...state,
+    boots: undefined,
+    activities: undefined,
+    events: undefined,
+    friendRatings: undefined,
+    dirtyQueue: state.dirtyQueue.map((record) => {
+      if (record.kind !== "event" || typeof record.payload !== "object" || record.payload === null) return record;
+      return { ...record, payload: compactEvent(record.payload as AppState["events"][number]) };
+    })
+  };
+}
+
 export function saveState(state: AppState) {
-  localStorage.setItem(storageKey, JSON.stringify(state));
-  if (state.settings.dataPath.trim()) {
-    void invoke("save_state_to_data_dir", {
-      dataDir: state.settings.dataPath.trim(),
-      stateJson: JSON.stringify(state)
+  const stateJson = JSON.stringify(stateForPersistence(state));
+  const dataDir = state.settings.dataPath.trim();
+  void invoke("save_local_state", {
+    dataDir,
+    stateJson
+  }).catch(() => undefined);
+  if (dataDir) {
+    void invoke("save_local_state", {
+      dataDir: "",
+      stateJson
     }).catch(() => undefined);
   }
+}
+
+export function saveStatePointer(state: AppState) {
+  const stateJson = JSON.stringify(stateForPersistence(state));
+  void invoke("save_local_state", {
+    dataDir: "",
+    stateJson
+  }).catch(() => undefined);
 }

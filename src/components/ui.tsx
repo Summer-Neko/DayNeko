@@ -94,12 +94,18 @@ export function Toggle({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <button className={`toggle-row ${compact ? "compact" : ""}`} type="button" onClick={() => onChange(!checked)}>
+    <div className={`toggle-row ${compact ? "compact" : ""}`}>
       <span>{label}</span>
-      <span className={`switch ${checked ? "on" : ""}`} aria-hidden="true">
+      <button
+        aria-label={label}
+        aria-pressed={checked}
+        className={`switch ${checked ? "on" : ""}`}
+        type="button"
+        onClick={() => onChange(!checked)}
+      >
         <span />
-      </span>
-    </button>
+      </button>
+    </div>
   );
 }
 

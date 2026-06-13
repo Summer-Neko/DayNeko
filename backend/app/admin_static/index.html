@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DayNeko Admin</title>
+    <link rel="stylesheet" href="/admin/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span>D</span>
+          <div>
+            <strong>DayNeko</strong>
+            <small>Admin Console</small>
+          </div>
+        </div>
+        <nav>
+          <button class="active" data-view="overview">总览</button>
+          <button data-view="users">用户</button>
+          <button data-view="records">数据记录</button>
+          <button data-view="requests">好友申请</button>
+        </nav>
+        <button class="ghost" id="logoutButton">退出登录</button>
+      </aside>
+
+      <section class="content">
+        <header class="hero">
+          <div>
+            <span>SERVER ADMIN</span>
+            <h1>DayNeko 后台管理</h1>
+            <p id="dbPath">正在连接数据库...</p>
+          </div>
+          <button id="refreshButton">刷新</button>
+        </header>
+
+        <section class="auth-card" id="authCard">
+          <div>
+            <span id="authMode">初始化管理员</span>
+            <h2 id="authTitle">设置后台密码</h2>
+            <p>首次进入后台时设置管理员密码。之后使用该密码登录，普通 DayNeko 用户不会自动拥有后台权限。</p>
+          </div>
+          <form id="authForm">
+            <input id="passwordInput" type="password" autocomplete="current-password" placeholder="至少 8 位密码" />
+            <button type="submit">继续</button>
+          </form>
+          <small id="authMessage"></small>
+        </section>
+
+        <section class="view active" id="overviewView">
+          <div class="stats" id="stats"></div>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span>Records</span>
+                <h2>记录类型分布</h2>
+              </div>
+            </div>
+            <div class="kind-list" id="kindList"></div>
+          </section>
+        </section>
+
+        <section class="view" id="usersView">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span>Users</span>
+                <h2>用户管理</h2>
+              </div>
+              <input id="userSearch" placeholder="搜索 id / 昵称 / handle" />
+            </div>
+            <div class="table" id="usersTable"></div>
+            <div class="pager">
+              <button data-page="users:prev">上一页</button>
+              <span id="usersPagerText">0 / 0</span>
+              <button data-page="users:next">下一页</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="recordsView">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span>Records</span>
+                <h2>数据记录</h2>
+              </div>
+              <div class="filters">
+                <select id="recordKind">
+                  <option value="">全部类型</option>
+                  <option value="user">user</option>
+                  <option value="boot">boot</option>
+                  <option value="activity">activity</option>
+                  <option value="event">event</option>
+                  <option value="friend-rating">friend-rating</option>
+                  <option value="presence">presence</option>
+                </select>
+                <input id="recordFrom" type="date" title="起始更新时间" />
+                <input id="recordTo" type="date" title="结束更新时间" />
+                <input id="recordSearch" placeholder="搜索 payload" />
+              </div>
+            </div>
+            <div class="table" id="recordsTable"></div>
+            <div class="pager">
+              <button data-page="records:prev">上一页</button>
+              <span id="recordsPagerText">0 / 0</span>
+              <button data-page="records:next">下一页</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="requestsView">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span>Friend Requests</span>
+                <h2>好友申请</h2>
+              </div>
+            </div>
+            <div class="table" id="requestsTable"></div>
+            <div class="pager">
+              <button data-page="requests:prev">上一页</button>
+              <span id="requestsPagerText">0 / 0</span>
+              <button data-page="requests:next">下一页</button>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="/admin/assets/app.js" type="module"></script>
+  </body>
+</html>

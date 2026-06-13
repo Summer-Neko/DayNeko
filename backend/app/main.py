@@ -12,6 +12,8 @@ from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .admin import router as admin_router
+
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "dayneko.db"
 
@@ -28,7 +30,9 @@ class BootEvent(BaseModel):
     id: str
     userId: str
     startedAt: str
+    endedAt: str | None = None
     device: str
+    updatedAt: str | None = None
 
 
 class ActivityEntry(BaseModel):
@@ -73,6 +77,7 @@ class EvidenceImage(BaseModel):
     name: str
     dataUrl: str
     size: int
+    date: str | None = None
     createdAt: str
 
 
@@ -83,6 +88,8 @@ class CustomEvent(BaseModel):
     description: str = ""
     date: str
     repeatDaily: bool = False
+    isTemplate: bool | None = None
+    templateId: str | None = None
     completedDates: list[str] = Field(default_factory=list)
     evidence: list[EvidenceImage] = Field(default_factory=list)
     createdAt: str
@@ -158,6 +165,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(admin_router)
 
 
 def connect() -> sqlite3.Connection:
@@ -174,6 +182,7 @@ def init_db() -> None:
                 id text primary key,
                 name text not null,
                 handle text not null unique,
+                avatar text,
                 machine_key text unique,
                 updated_at text not null
             );
@@ -206,12 +215,33 @@ def init_db() -> None:
             """
         )
         columns = {row["name"] for row in conn.execute("pragma table_info(users)").fetchall()}
+        if "avatar" not in columns:
+            conn.execute("alter table users add column avatar text")
         if "machine_key" not in columns:
             conn.execute("alter table users add column machine_key text")
         conn.execute("create unique index if not exists idx_users_machine_key on users(machine_key)")
 
 
 def upsert_record(conn: sqlite3.Connection, user_id: str, kind: str, row_id: str, payload: dict[str, Any]) -> None:
+    if payload.get("deleted"):
+        conn.execute("delete from records where id = ? and user_id = ? and kind = ?", (row_id, user_id, kind))
+        return
+    if kind == "friend-rating" and not payload.get("eventIds"):
+        raise HTTPException(status_code=400, detail="cannot rate empty schedule")
+    if kind == "event" and not (payload.get("isTemplate") or (payload.get("repeatDaily") and not payload.get("templateId"))):
+        title = (payload.get("title") or "").strip().lower()
+        date = payload.get("date")
+        if title and date:
+            rows = conn.execute(
+                "select id, payload from records where user_id = ? and kind = 'event' and id != ?",
+                (user_id, row_id),
+            ).fetchall()
+            for row in rows:
+                existing = json.loads(row["payload"])
+                if existing.get("deleted") or existing.get("isTemplate") or (existing.get("repeatDaily") and not existing.get("templateId")):
+                    continue
+                if (existing.get("title") or "").strip().lower() == title and existing.get("date") == date:
+                    raise HTTPException(status_code=409, detail="duplicate event title for this date")
     conn.execute(
         """
         insert into records (id, user_id, kind, payload, updated_at)
@@ -235,15 +265,16 @@ def upsert_record(conn: sqlite3.Connection, user_id: str, kind: str, row_id: str
 def upsert_user(conn: sqlite3.Connection, user: User) -> None:
     conn.execute(
         """
-        insert into users (id, name, handle, machine_key, updated_at)
-        values (?, ?, ?, ?, ?)
+        insert into users (id, name, handle, avatar, machine_key, updated_at)
+        values (?, ?, ?, ?, ?, ?)
         on conflict(id) do update set
             name=excluded.name,
             handle=excluded.handle,
+            avatar=excluded.avatar,
             machine_key=coalesce(users.machine_key, excluded.machine_key),
             updated_at=excluded.updated_at
         """,
-        (user.id, user.name, user.handle, user.machineKey, datetime.now(timezone.utc).isoformat()),
+        (user.id, user.name, user.handle, user.avatar, user.machineKey, datetime.now(timezone.utc).isoformat()),
     )
 
 
@@ -252,6 +283,7 @@ def user_payload(row: sqlite3.Row) -> dict[str, Any]:
         "id": row["id"],
         "name": row["name"],
         "handle": row["handle"],
+        "avatar": row["avatar"],
         "machineKey": row["machine_key"],
     }
 
@@ -274,6 +306,7 @@ def public_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "id": row["id"],
         "name": row["name"],
         "handle": row["handle"],
+        "avatar": row["avatar"],
         "machineKey": row["machine_key"],
         "updatedAt": row["updated_at"],
     }
@@ -400,6 +433,7 @@ def user_friends(user_id: str) -> dict[str, Any]:
                     "id": user["id"],
                     "name": user["name"],
                     "handle": user["handle"],
+                    "avatar": user.get("avatar"),
                     "status": (presence or activity or {}).get("label", "暂无状态"),
                     "mood": (presence or activity or {}).get("mood", "未知"),
                     "detail": (presence or {}).get("detail", ""),
@@ -592,7 +626,11 @@ def snapshot(user_id: str) -> dict[str, Any]:
     for row in rows:
         key = key_map.get(row["kind"])
         if key:
-            grouped[key].append(json.loads(row["payload"]))
+            payload = json.loads(row["payload"])
+            if not payload.get("deleted"):
+                if row["kind"] == "friend-rating" and not payload.get("eventIds"):
+                    continue
+                grouped[key].append(payload)
 
     return {
         "user": dict(user_row) if user_row else None,
@@ -613,6 +651,12 @@ def user_schedule(user_id: str, cursor: str | None = None, limit: int = 7) -> di
     by_date: dict[str, dict[str, Any]] = {}
     for row in rows:
         payload = json.loads(row["payload"])
+        if payload.get("deleted"):
+            continue
+        if row["kind"] == "event" and (payload.get("isTemplate") or (payload.get("repeatDaily") and not payload.get("templateId"))):
+            continue
+        if row["kind"] == "friend-rating" and not payload.get("eventIds"):
+            continue
         if row["kind"] == "activity":
             date = (payload.get("startedAt") or "")[:10]
         else:
@@ -654,13 +698,37 @@ def leaderboard(scope: Literal["7d", "all"] = "7d") -> dict[str, Any]:
     init_db()
     since = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
     rank_score = {"SSS": 100, "S": 88, "A": 76, "B": 62, "C": 45}
+    def score_to_rank(score: float) -> str:
+        if score >= 94:
+            return "SSS"
+        if score >= 84:
+            return "S"
+        if score >= 72:
+            return "A"
+        if score >= 58:
+            return "B"
+        return "C"
+
     scores: dict[str, dict[str, Any]] = {}
+    completed: dict[str, int] = {}
     with connect() as conn:
         users = {row["id"]: dict(row) for row in conn.execute("select * from users").fetchall()}
-        rows = conn.execute("select payload from records where kind = 'friend-rating'").fetchall()
+        rows = conn.execute("select kind, payload from records where kind in ('friend-rating', 'event')").fetchall()
 
     for row in rows:
         payload = json.loads(row["payload"])
+        if payload.get("deleted"):
+            continue
+        if row["kind"] == "event":
+            if payload.get("isTemplate") or (payload.get("repeatDaily") and not payload.get("templateId")):
+                continue
+            user_id = payload.get("userId")
+            done_dates = payload.get("completedDates") or []
+            if user_id:
+                completed[user_id] = completed.get(user_id, 0) + len([date for date in done_dates if scope == "all" or date >= since])
+            continue
+        if not payload.get("eventIds"):
+            continue
         if scope == "7d" and payload.get("date", "") < since:
             continue
         user_id = payload.get("targetUserId")
@@ -672,14 +740,18 @@ def leaderboard(scope: Literal["7d", "all"] = "7d") -> dict[str, Any]:
         bucket["ratedDays"] += 1
 
     entries = []
-    for user_id, bucket in scores.items():
+    for user_id in set(scores) | set(completed):
+        bucket = scores.get(user_id, {"score": 0, "ratedDays": 0})
         user = users.get(user_id, {})
+        average = bucket["score"] / bucket["ratedDays"] if bucket["ratedDays"] else 45
         entries.append(
             {
                 "userId": user_id,
                 "name": user.get("name", user_id),
                 "handle": user.get("handle", ""),
                 "score": bucket["score"],
+                "rank": score_to_rank(average),
+                "completed": completed.get(user_id, 0),
                 "ratedDays": bucket["ratedDays"],
             }
         )

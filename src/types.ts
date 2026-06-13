@@ -26,7 +26,13 @@ export type AppSettings = {
   dataPath: string;
   background?: string;
   backgroundBrightness: number;
+  cardOpacity: number;
+  cardBlur: number;
+  cardShadow: number;
   syncIntervalSeconds: number;
+  autoDiscoverServer: boolean;
+  autoCheckUpdate: boolean;
+  autoDownloadUpdate: boolean;
 };
 
 export type DirtyRecord = {
@@ -51,6 +57,7 @@ export type BootEvent = {
   id: string;
   userId: string;
   startedAt: string;
+  endedAt?: string;
   device: string;
   updatedAt: string;
 };
@@ -59,7 +66,10 @@ export type EvidenceImage = {
   id: string;
   name: string;
   dataUrl: string;
+  filePath?: string;
+  mimeType?: string;
   size: number;
+  date?: string;
   createdAt: string;
 };
 
@@ -70,6 +80,8 @@ export type CustomEvent = {
   description: string;
   date: string;
   repeatDaily: boolean;
+  isTemplate?: boolean;
+  templateId?: string;
   completedDates: string[];
   evidence: EvidenceImage[];
   createdAt: string;
@@ -80,6 +92,7 @@ export type Friend = {
   id: string;
   name: string;
   handle: string;
+  avatar?: string;
   status: string;
   mood: string;
   detail?: string;
@@ -145,12 +158,20 @@ export type AppState = {
 export type EvidenceSelection = {
   eventId: string;
   index: number;
+  date?: string;
 };
 
 export type EvidenceDraft = {
   eventId: string;
   dataUrl?: string;
   name: string;
+};
+
+export type AvatarCropDraft = {
+  dataUrl: string;
+  scale: number;
+  x: number;
+  y: number;
 };
 
 export type FriendDay = {
@@ -187,4 +208,19 @@ export type PresenceStatus = {
 export type DeviceAuthResult = {
   status: "created" | "logged-in";
   user: UserProfile;
+};
+
+export type UpdateInfo = {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  title: string;
+  notes: string;
+  url: string;
+  publishedAt?: string;
+  assets: Array<{
+    name: string;
+    size: number;
+    downloadUrl: string;
+  }>;
 };

@@ -3,12 +3,17 @@ import type {
   AppSettings,
   DeviceAuthResult,
   DirtyRecord,
+  CustomEvent,
   Friend,
   FriendDay,
+  FriendRating,
   FriendRequest,
+  LeaderboardEntry,
+  LeaderboardScope,
   PresenceStatus,
   UserProfile
 } from "../types";
+import { serverConfigUrl } from "./config";
 
 export function normalizeServerUrl(value: string) {
   const trimmed = value.trim();
@@ -116,10 +121,36 @@ export async function actOnFriendRequest(settings: AppSettings, userId: string, 
   return response.json() as Promise<{ request: FriendRequest }>;
 }
 
-export async function fetchFriendDays(settings: AppSettings, friendId: string, cursor?: string | null) {
-  const search = new URLSearchParams({ limit: "7" });
+export async function fetchFriendDays(settings: AppSettings, friendId: string, cursor?: string | null, limit = 7) {
+  const search = new URLSearchParams({ limit: String(limit) });
   if (cursor) search.set("cursor", cursor);
   const response = await fetch(`${normalizeServerUrl(settings.serverUrl)}/users/${friendId}/schedule?${search.toString()}`);
   if (!response.ok) throw new Error(`friend days failed: ${response.status}`);
   return response.json() as Promise<{ items: FriendDay[]; nextCursor: string | null }>;
+}
+
+export async function fetchUserSnapshot(settings: AppSettings, userId: string) {
+  const response = await fetch(`${normalizeServerUrl(settings.serverUrl)}/users/${userId}/snapshot`);
+  if (!response.ok) throw new Error(`snapshot failed: ${response.status}`);
+  return response.json() as Promise<{
+    events?: CustomEvent[];
+    friendRatings?: FriendRating[];
+  }>;
+}
+
+export async function fetchLeaderboard(settings: AppSettings, scope: LeaderboardScope) {
+  const search = new URLSearchParams({ scope });
+  const response = await fetch(`${normalizeServerUrl(settings.serverUrl)}/leaderboard?${search.toString()}`);
+  if (!response.ok) throw new Error(`leaderboard failed: ${response.status}`);
+  const result = await response.json() as { entries: LeaderboardEntry[] };
+  return result.entries;
+}
+
+export async function fetchServerConfig() {
+  const response = await fetch(`${serverConfigUrl}?t=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`server config failed: ${response.status}`);
+  const config = await response.json() as { server?: string };
+  if (!config.server?.trim()) throw new Error("server config is empty");
+  const server = normalizeServerUrl(config.server);
+  return server;
 }

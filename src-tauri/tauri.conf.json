@@ -13,11 +13,12 @@
     "windows": [
       {
         "title": "DayNeko",
-        "width": 1040,
-        "height": 700,
+        "width": 1200,
+        "height": 640,
         "minWidth": 820,
         "minHeight": 560,
-        "resizable": true
+        "resizable": true,
+        "decorations": false
       }
     ],
     "security": {
@@ -26,7 +27,19 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": ["icons/icon.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFCNjc3MjA1RThDNTE5NApSV1NVVVl4ZUlIZTJDa3RsMDJwZlJiblI5U2hEYnJLRHJSbGJVZllUbUlnem9VNVJLbDZzd2NHeQo=",
+      "endpoints": [
+        "https://github.com/Summer-Neko/DayNeko/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
