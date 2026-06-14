@@ -467,6 +467,52 @@ fn load_payload_array_limited(conn: &Connection, table: &str, limit: i64) -> Res
     Ok(Value::Array(items))
 }
 
+fn load_time_dates(conn: &Connection, limit: i64) -> Result<Value, String> {
+    let mut stmt = conn
+        .prepare(
+            "
+            select date from (
+                select coalesce(json_extract(payload, '$.date'), substr(json_extract(payload, '$.startedAt'), 1, 10)) as date
+                from activities
+                union
+                select coalesce(json_extract(payload, '$.date'), substr(json_extract(payload, '$.startedAt'), 1, 10)) as date
+                from boots
+            )
+            where date is not null and date != ''
+            order by date desc
+            limit ?
+            ",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![limit], |row| row.get::<_, String>(0))
+        .map_err(|err| err.to_string())?;
+    let mut dates = Vec::new();
+    for row in rows {
+        dates.push(Value::String(row.map_err(|err| err.to_string())?));
+    }
+    Ok(Value::Array(dates))
+}
+
+fn load_time_payloads_for_date(conn: &Connection, table: &str, date: &str, limit: i64) -> Result<Value, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "
+            select payload from {table}
+            where json_extract(payload, '$.date') = ?
+               or substr(json_extract(payload, '$.startedAt'), 1, 10) = ?
+               or substr(json_extract(payload, '$.endedAt'), 1, 10) = ?
+            order by updated_at desc
+            limit ?
+            "
+        ))
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![date, date, date, limit], |row| row.get::<_, String>(0))
+        .map_err(|err| err.to_string())?;
+    payload_rows_to_array(rows)
+}
+
 fn payload_rows_to_array(rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<String>>) -> Result<Value, String> {
     let mut items = Vec::new();
     for row in rows {
@@ -698,6 +744,22 @@ fn load_local_time_data(data_dir: String, limit: Option<i64>) -> Result<String, 
     let mut value = Map::new();
     value.insert("activities".to_string(), load_payload_array_limited(&conn, "activities", bounded_limit)?);
     value.insert("boots".to_string(), load_payload_array_limited(&conn, "boots", bounded_limit)?);
+    json_text(&Value::Object(value))
+}
+
+#[tauri::command]
+fn load_local_time_dates(data_dir: String, limit: Option<i64>) -> Result<String, String> {
+    let conn = connect_local_db(&data_dir)?;
+    json_text(&load_time_dates(&conn, limit.unwrap_or(5000).clamp(1, 20000))?)
+}
+
+#[tauri::command]
+fn load_local_time_day_data(data_dir: String, date: String, limit: Option<i64>) -> Result<String, String> {
+    let conn = connect_local_db(&data_dir)?;
+    let bounded_limit = limit.unwrap_or(1000).clamp(1, 5000);
+    let mut value = Map::new();
+    value.insert("activities".to_string(), load_time_payloads_for_date(&conn, "activities", &date, bounded_limit)?);
+    value.insert("boots".to_string(), load_time_payloads_for_date(&conn, "boots", &date, bounded_limit)?);
     json_text(&Value::Object(value))
 }
 
@@ -1064,6 +1126,8 @@ pub fn run() {
             load_local_home_data,
             load_local_schedule_data,
             load_local_time_data,
+            load_local_time_dates,
+            load_local_time_day_data,
             load_local_friend_rating_data,
             save_local_record,
             delete_local_record,

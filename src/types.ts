@@ -47,6 +47,7 @@ export type ActivityEntry = {
   userId: string;
   label: string;
   mood: string;
+  date?: string;
   startedAt: string;
   endedAt?: string;
   source: "manual" | "auto";
@@ -56,6 +57,7 @@ export type ActivityEntry = {
 export type BootEvent = {
   id: string;
   userId: string;
+  date?: string;
   startedAt: string;
   endedAt?: string;
   device: string;
@@ -179,6 +181,7 @@ export type FriendDay = {
   events: CustomEvent[];
   ratings: FriendRating[];
   activities: Array<ActivityEntry & { minutes?: number }>;
+  boots: BootEvent[];
   totalMinutes: number;
 };
 

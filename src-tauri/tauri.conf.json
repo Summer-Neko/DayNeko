@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DayNeko",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "app.dayneko.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,7 +29,16 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
-    "icon": ["icons/icon.ico"]
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "./windows/hooks.nsh",
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
+      }
+    }
   },
   "plugins": {
     "updater": {

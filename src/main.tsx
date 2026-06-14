@@ -31,6 +31,8 @@ import {
   loadFriendRatingData,
   loadHomeData,
   loadScheduleData,
+  loadTimeDates,
+  loadTimeDayData,
   loadTimeData,
   saveLocalRecord,
   type LocalDataSnapshot
@@ -159,6 +161,7 @@ function App() {
   const [friendDaysLoading, setFriendDaysLoading] = React.useState(false);
   const [leaderboardEntries, setLeaderboardEntries] = React.useState<LeaderboardEntry[]>([]);
   const [leaderboardScope, setLeaderboardScope] = React.useState<LeaderboardScope>("7d");
+  const [timeDates, setTimeDates] = React.useState<string[]>([]);
   const [syncStatus, setSyncStatus] = useNotifiedStatus("等待自动同步", "同步", notifications.notify);
   const [serverStatus, setServerStatus] = useNotifiedStatus("尚未测试", "服务器", notifications.notify);
   const [loginStatus, setLoginStatus] = useNotifiedStatus("未登录服务器", "登录", notifications.notify);
@@ -206,6 +209,20 @@ function App() {
         next.boots = [currentBoot, ...next.boots];
       }
       return next;
+    });
+  }, []);
+
+  const mergeTimeData = React.useCallback((snapshot: Pick<LocalDataSnapshot, "activities" | "boots">) => {
+    setLocalData((prev) => {
+      const activities = new Map(prev.activities.map((item) => [item.id, item]));
+      const boots = new Map(prev.boots.map((item) => [item.id, item]));
+      snapshot.activities.forEach((item) => activities.set(item.id, item));
+      snapshot.boots.forEach((item) => boots.set(item.id, item));
+      return {
+        ...prev,
+        activities: normalizeActivityEntries(Array.from(activities.values())).slice(0, 5000),
+        boots: Array.from(boots.values()).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()).slice(0, 5000)
+      };
     });
   }, []);
 
@@ -279,10 +296,23 @@ function App() {
 
   React.useEffect(() => {
     if (page !== "time") return;
-    void loadTimeData(state.settings.dataPath)
-      .then(mergeLocalData)
+    void Promise.all([
+      loadTimeData(state.settings.dataPath),
+      loadTimeDates(state.settings.dataPath)
+    ])
+      .then(([timeData, dates]) => {
+        mergeLocalData(timeData);
+        setTimeDates(dates);
+      })
       .catch(() => undefined);
   }, [mergeLocalData, page, state.settings.dataPath]);
+
+  const loadTimeDate = React.useCallback((date: string) => {
+    if (!date) return;
+    void loadTimeDayData(state.settings.dataPath, date)
+      .then(mergeTimeData)
+      .catch(() => undefined);
+  }, [mergeTimeData, state.settings.dataPath]);
 
   const refreshServerFriendRatings = React.useCallback(async () => {
     if (!state.cloudSession) return;
@@ -470,9 +500,12 @@ function App() {
 
   React.useEffect(() => {
     if (!state.cloudSession) return;
-    const interval = window.setInterval(() => void refreshFriends(), 20000);
+    const interval = window.setInterval(() => {
+      void refreshFriends();
+      if (selectedFriendData) void loadFriendDays(selectedFriendData.id);
+    }, 20000);
     return () => window.clearInterval(interval);
-  }, [refreshFriends, state.cloudSession]);
+  }, [loadFriendDays, refreshFriends, selectedFriendData, state.cloudSession]);
 
   const runSync = React.useCallback(async () => {
     if (!state.cloudSession) {
@@ -552,7 +585,9 @@ function App() {
     const boot: BootEvent = {
       id: uid(),
       userId: currentState.user.id,
+      date: scheduleDateKey(),
       startedAt,
+      endedAt: startedAt,
       device: navigator.userAgent.includes("Windows") ? "Windows desktop" : "Local device",
       updatedAt: startedAt
     };
@@ -562,7 +597,7 @@ function App() {
       const closedBoots = prev.boots.map((item) => {
         if (item.endedAt) return item;
         const endedAt = item.updatedAt || item.startedAt;
-        return { ...item, endedAt, updatedAt: endedAt };
+        return { ...item, date: item.date ?? scheduleDateKey(), endedAt, updatedAt: endedAt };
       });
       const changedBoots = closedBoots.filter((item, index) => prev.boots[index] !== item);
       [boot, ...changedBoots].forEach((item) => void saveLocalRecord(currentState.settings.dataPath, "boot", item, currentState.user.id));
@@ -581,7 +616,7 @@ function App() {
         let changedBoot: BootEvent | null = null;
         const boots = prev.boots.map((item) => {
           if (item.id !== bootId) return item;
-          changedBoot = { ...item, updatedAt: timestamp, endedAt: ended ? timestamp : item.endedAt };
+          changedBoot = { ...item, date: item.date ?? scheduleDateKey(), updatedAt: timestamp, endedAt: timestamp };
           currentBootRef.current = changedBoot;
           return changedBoot;
         });
@@ -626,31 +661,94 @@ function App() {
   const applyAutoActivity = React.useCallback((detected: AutoActivity | null) => {
     setLocalData((prev) => {
       const currentState = stateRef.current;
-      const current = prev.activities[0];
+      const now = nowIso();
+      const nowTime = new Date(now).getTime();
+      const staleOpen = prev.activities
+        .filter((item) => {
+          if (item.endedAt || item.source !== "auto") return false;
+          const updatedTime = new Date(item.updatedAt || item.startedAt).getTime();
+          return Number.isFinite(updatedTime) && nowTime - updatedTime > 30 * 60 * 1000;
+        })
+        .map((item) => {
+          const endedAt = item.updatedAt || item.startedAt;
+          return { ...item, date: item.date ?? scheduleDateKey(), endedAt, updatedAt: endedAt };
+        });
+      const staleIds = new Set(staleOpen.map((item) => item.id));
+      const baseActivities = staleIds.size > 0
+        ? prev.activities.map((item) => staleOpen.find((changed) => changed.id === item.id) ?? item)
+        : prev.activities;
       if (!detected) {
-        if (!current || current.endedAt || current.source !== "auto") return prev;
-        const ended = { ...current, endedAt: nowIso(), updatedAt: nowIso() };
-        void saveLocalRecord(currentState.settings.dataPath, "activity", ended, currentState.user.id);
-        enqueueDirty([markDirty("activity", ended.id, ended)]);
-        return { ...prev, activities: normalizeActivityEntries([ended, ...prev.activities.slice(1)]) };
+        const timestamp = now;
+        const changed = baseActivities.filter((item) => !item.endedAt && item.source === "auto").map((item) => ({
+          ...item,
+          date: item.date ?? scheduleDateKey(),
+          endedAt: timestamp,
+          updatedAt: timestamp
+        }));
+        const allChanged = [...staleOpen, ...changed];
+        if (allChanged.length === 0) return prev;
+        allChanged.forEach((item) => void saveLocalRecord(currentState.settings.dataPath, "activity", item, currentState.user.id));
+        enqueueDirty(allChanged.map((item) => markDirty("activity", item.id, item)));
+        const changedById = new Map(allChanged.map((item) => [item.id, item]));
+        return {
+          ...prev,
+          activities: normalizeActivityEntries(prev.activities.map((item) => changedById.get(item.id) ?? item)).slice(0, 1000)
+        };
       }
 
-      if (current && !current.endedAt && current.source === "auto" && activityKey(current) === detected.label.toLowerCase()) {
-        return prev;
+      const detectedKey = detected.label.trim().toLowerCase();
+      const openSame = baseActivities.find((item) => !item.endedAt && item.source === "auto" && activityKey(item) === detectedKey);
+      const closeOtherOpenActivities = (keepId?: string) => baseActivities
+        .filter((item) => item.id !== keepId && !item.endedAt && item.source === "auto")
+        .map((item) => {
+          const endedAt = item.updatedAt || item.startedAt;
+          return { ...item, date: item.date ?? scheduleDateKey(), endedAt, updatedAt: endedAt };
+        });
+      if (openSame) {
+        const timestamp = now;
+        const closedOthers = closeOtherOpenActivities(openSame.id);
+        if (new Date(timestamp).getTime() - new Date(openSame.updatedAt || openSame.startedAt).getTime() >= 60_000) {
+          const touched = { ...openSame, date: openSame.date ?? scheduleDateKey(), updatedAt: timestamp };
+          const allChanged = [...staleOpen, touched, ...closedOthers];
+          allChanged.forEach((item) => void saveLocalRecord(currentState.settings.dataPath, "activity", item, currentState.user.id));
+          enqueueDirty(allChanged.map((item) => markDirty("activity", item.id, item)));
+          const changedById = new Map(allChanged.map((item) => [item.id, item]));
+          return {
+            ...prev,
+            activities: normalizeActivityEntries(prev.activities.map((item) => changedById.get(item.id) ?? item)).slice(0, 1000)
+          };
+        }
+        const allChanged = [...staleOpen, ...closedOthers];
+        if (allChanged.length === 0) return prev;
+        allChanged.forEach((item) => void saveLocalRecord(currentState.settings.dataPath, "activity", item, currentState.user.id));
+        enqueueDirty(allChanged.map((item) => markDirty("activity", item.id, item)));
+        const changedById = new Map(allChanged.map((item) => [item.id, item]));
+        return {
+          ...prev,
+          activities: normalizeActivityEntries(prev.activities.map((item) => changedById.get(item.id) ?? item)).slice(0, 1000)
+        };
       }
 
-      const startedAt = nowIso();
+      const startedAt = now;
+      const latestClosedSame = baseActivities.find((item) =>
+        item.source === "auto" &&
+        item.endedAt &&
+        activityKey(item) === detectedKey
+      );
       if (
-        current &&
-        current.source === "auto" &&
-        current.endedAt &&
-        activityKey(current) === detected.label.toLowerCase() &&
-        new Date(startedAt).getTime() - new Date(current.endedAt).getTime() <= 30 * 60 * 1000
+        latestClosedSame &&
+        new Date(startedAt).getTime() - new Date(latestClosedSame.endedAt!).getTime() <= 30 * 60 * 1000
       ) {
-        const merged = { ...current, endedAt: undefined, updatedAt: startedAt };
-        void saveLocalRecord(currentState.settings.dataPath, "activity", merged, currentState.user.id);
-        enqueueDirty([markDirty("activity", merged.id, merged)]);
-        return { ...prev, activities: [merged, ...prev.activities.slice(1)] };
+        const closedOthers = closeOtherOpenActivities(latestClosedSame.id);
+        const merged = { ...latestClosedSame, date: latestClosedSame.date ?? scheduleDateKey(), endedAt: undefined, updatedAt: startedAt };
+        const allChanged = [...staleOpen, merged, ...closedOthers];
+        allChanged.forEach((item) => void saveLocalRecord(currentState.settings.dataPath, "activity", item, currentState.user.id));
+        enqueueDirty(allChanged.map((item) => markDirty("activity", item.id, item)));
+        const changedById = new Map(allChanged.map((item) => [item.id, item]));
+        return {
+          ...prev,
+          activities: normalizeActivityEntries(prev.activities.map((item) => changedById.get(item.id) ?? item)).slice(0, 1000)
+        };
       }
 
       const entry: ActivityEntry = {
@@ -658,23 +756,20 @@ function App() {
         userId: currentState.user.id,
         label: detected.label,
         mood: detected.mood,
+        date: scheduleDateKey(),
         startedAt,
         source: "auto",
         updatedAt: startedAt
       };
-      const closedActivities = prev.activities.map((item, index) =>
-        index === 0 && !item.endedAt ? { ...item, endedAt: startedAt, updatedAt: startedAt } : item
-      );
-      const changed = closedActivities.filter((item, index) => index === 0 && prev.activities[index] !== item);
+      const closedOthers = closeOtherOpenActivities(entry.id);
+      const allChanged = [...staleOpen, entry, ...closedOthers];
+      const changedById = new Map(allChanged.map((item) => [item.id, item]));
       const next = {
         ...prev,
-        activities: normalizeActivityEntries([entry, ...closedActivities]).slice(0, 1000)
+        activities: normalizeActivityEntries([entry, ...prev.activities.map((item) => changedById.get(item.id) ?? item)]).slice(0, 1000)
       };
-      [entry, ...changed].forEach((item) => void saveLocalRecord(currentState.settings.dataPath, "activity", item, currentState.user.id));
-      enqueueDirty([
-        ...changed.map((item) => markDirty("activity", item.id, item)),
-        markDirty("activity", entry.id, entry)
-      ]);
+      allChanged.forEach((item) => void saveLocalRecord(currentState.settings.dataPath, "activity", item, currentState.user.id));
+      enqueueDirty(allChanged.map((item) => markDirty("activity", item.id, item)));
       return next;
     });
   }, []);
@@ -1215,7 +1310,7 @@ function App() {
             onToggleEvent={toggleEvent}
           />
         )}
-        {page === "time" && <TimePage activities={localData.activities} boots={localData.boots} />}
+        {page === "time" && <TimePage activities={localData.activities} availableDates={timeDates} boots={localData.boots} onDateChange={loadTimeDate} />}
         {page === "events" && (
           <EventsPage
             events={visibleEvents}

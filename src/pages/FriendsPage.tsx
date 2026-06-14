@@ -7,7 +7,7 @@ import { ranks } from "../lib/config";
 import { isArchiveClosed, yesterdayKey } from "../lib/date";
 import { evidenceEntriesForDate } from "../lib/evidence";
 import { isRecentlyOnline } from "../lib/presence";
-import type { CustomEvent, Friend, FriendDay, FriendRating, FriendRequest, Rank, UserProfile } from "../types";
+import type { ActivityEntry, BootEvent, CustomEvent, Friend, FriendDay, FriendRating, FriendRequest, Rank, UserProfile } from "../types";
 
 function FriendEvidenceStrip({
   date,
@@ -30,6 +30,34 @@ function FriendEvidenceStrip({
       ))}
     </div>
   );
+}
+
+function activityMinutes(activity: { startedAt: string; endedAt?: string }) {
+  const start = new Date(activity.startedAt).getTime();
+  if (!Number.isFinite(start)) return 0;
+  const end = activity.endedAt ? new Date(activity.endedAt).getTime() : Date.now();
+  if (!Number.isFinite(end)) return 0;
+  return Math.max(1, Math.round((end - start) / 60000));
+}
+
+function dayActivityMinutes(day: FriendDay) {
+  return day.activities.map(closeStaleOpenInterval).reduce((sum, activity) => sum + activityMinutes(activity), 0);
+}
+
+function closeStaleOpenInterval<T extends { endedAt?: string; updatedAt?: string; startedAt: string }>(item: T): T {
+  if (item.endedAt) return item;
+  const updatedAt = item.updatedAt || item.startedAt;
+  const updatedTime = new Date(updatedAt).getTime();
+  if (!Number.isFinite(updatedTime) || Date.now() - updatedTime <= 5 * 60_000) return item;
+  return { ...item, endedAt: updatedAt, updatedAt };
+}
+
+function friendActivitiesForDisplay(days: FriendDay[]): ActivityEntry[] {
+  return days.flatMap((day) => day.activities.map(closeStaleOpenInterval));
+}
+
+function friendBootsForDisplay(days: FriendDay[]): BootEvent[] {
+  return days.flatMap((day) => (day.boots ?? []).map(closeStaleOpenInterval));
 }
 
 export function FriendsPage(props: {
@@ -252,8 +280,8 @@ export function FriendsPage(props: {
           <div className="friend-time-list">
             <TimeDashboard
               availableDates={props.friendDays.map((day) => day.date)}
-              activities={props.friendDays.flatMap((day) => day.activities)}
-              boots={[]}
+              activities={friendActivitiesForDisplay(props.friendDays)}
+              boots={friendBootsForDisplay(props.friendDays)}
               embedded
               ownerLabel={selected.name}
               title={`${selected.name} 的时间地图`}
@@ -264,14 +292,20 @@ export function FriendsPage(props: {
                   <strong>{day.date}</strong>
                   <span>{day.activities.length} 段活动</span>
                 </div>
-                <b>{Math.round(day.totalMinutes / 60 * 10) / 10}h</b>
+                <b>{Math.round(dayActivityMinutes(day) / 60 * 10) / 10}h</b>
                 <div className="time-mini-bars">
                   {day.activities.slice(0, 8).map((activity) => (
-                    <span
-                      key={activity.id}
-                      title={`${activity.label} · ${activity.minutes ?? 1} 分钟`}
-                      style={{ height: `${Math.max(14, Math.min(86, activity.minutes ?? 1))}%` }}
-                    />
+                    (() => {
+                      const displayActivity = closeStaleOpenInterval(activity);
+                      const minutes = activityMinutes(displayActivity);
+                      return (
+                        <span
+                          key={activity.id}
+                          title={`${activity.label} · ${minutes} 分钟`}
+                          style={{ height: `${Math.max(14, Math.min(86, minutes))}%` }}
+                        />
+                      );
+                    })()
                   ))}
                 </div>
                 {day.activities.length === 0 && <p className="empty">这天没有同步到活动时长。</p>}

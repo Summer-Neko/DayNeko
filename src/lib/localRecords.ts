@@ -43,6 +43,21 @@ export async function loadTimeData(dataPath: string, limit = 1000): Promise<Pick
   });
 }
 
+export async function loadTimeDates(dataPath: string, limit = 5000): Promise<string[]> {
+  return loadLocalView("load_local_time_dates", {
+    dataDir: dataPath.trim(),
+    limit
+  });
+}
+
+export async function loadTimeDayData(dataPath: string, date: string, limit = 1000): Promise<Pick<LocalDataSnapshot, "activities" | "boots">> {
+  return loadLocalView("load_local_time_day_data", {
+    dataDir: dataPath.trim(),
+    date,
+    limit
+  });
+}
+
 export async function loadFriendRatingData(dataPath: string, userId: string, limit = 500): Promise<LocalFriendRatingData> {
   return loadLocalView("load_local_friend_rating_data", {
     dataDir: dataPath.trim(),

@@ -29,6 +29,7 @@ class User(BaseModel):
 class BootEvent(BaseModel):
     id: str
     userId: str
+    date: str | None = None
     startedAt: str
     endedAt: str | None = None
     device: str
@@ -40,9 +41,11 @@ class ActivityEntry(BaseModel):
     userId: str
     label: str
     mood: str
+    date: str | None = None
     startedAt: str
     endedAt: str | None = None
     source: Literal["manual", "auto"] = "manual"
+    updatedAt: str | None = None
 
 
 class ScheduleItem(BaseModel):
@@ -228,6 +231,28 @@ def upsert_record(conn: sqlite3.Connection, user_id: str, kind: str, row_id: str
         return
     if kind == "friend-rating" and not payload.get("eventIds"):
         raise HTTPException(status_code=400, detail="cannot rate empty schedule")
+    if kind == "activity" and not payload.get("endedAt"):
+        rows = conn.execute(
+            "select id, payload from records where user_id = ? and kind = 'activity' and id != ?",
+            (user_id, row_id),
+        ).fetchall()
+        for row in rows:
+            existing = json.loads(row["payload"])
+            if existing.get("deleted") or existing.get("endedAt"):
+                continue
+            ended_at = existing.get("updatedAt") or existing.get("startedAt")
+            if not ended_at:
+                continue
+            existing["endedAt"] = ended_at
+            existing["updatedAt"] = ended_at
+            conn.execute(
+                """
+                update records
+                set payload = ?, updated_at = ?
+                where id = ? and user_id = ? and kind = 'activity'
+                """,
+                (json.dumps(existing, ensure_ascii=False), datetime.now(timezone.utc).isoformat(), row["id"], user_id),
+            )
     if kind == "event" and not (payload.get("isTemplate") or (payload.get("repeatDaily") and not payload.get("templateId"))):
         title = (payload.get("title") or "").strip().lower()
         date = payload.get("date")
@@ -644,7 +669,7 @@ def user_schedule(user_id: str, cursor: str | None = None, limit: int = 7) -> di
     limit = max(1, min(limit, 30))
     with connect() as conn:
         rows = conn.execute(
-            "select kind, payload from records where user_id = ? and kind in ('event', 'friend-rating', 'activity')",
+            "select kind, payload from records where user_id = ? and kind in ('event', 'friend-rating', 'activity', 'boot')",
             (user_id,),
         ).fetchall()
 
@@ -657,32 +682,21 @@ def user_schedule(user_id: str, cursor: str | None = None, limit: int = 7) -> di
             continue
         if row["kind"] == "friend-rating" and not payload.get("eventIds"):
             continue
-        if row["kind"] == "activity":
-            date = (payload.get("startedAt") or "")[:10]
+        if row["kind"] in ("activity", "boot"):
+            date = payload.get("date") or (payload.get("startedAt") or "")[:10]
         else:
             date = payload.get("date")
         if not date or (cursor and date >= cursor):
             continue
-        bucket = by_date.setdefault(date, {"date": date, "events": [], "ratings": [], "activities": [], "totalMinutes": 0})
+        bucket = by_date.setdefault(date, {"date": date, "events": [], "ratings": [], "activities": [], "boots": [], "totalMinutes": 0})
         if row["kind"] == "event":
             bucket["events"].append(payload)
         elif row["kind"] == "friend-rating":
             bucket["ratings"].append(payload)
         elif row["kind"] == "activity":
-            started = payload.get("startedAt")
-            ended = payload.get("endedAt")
-            if started:
-                try:
-                    start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
-                    end_dt = datetime.fromisoformat(ended.replace("Z", "+00:00")) if ended else datetime.now(timezone.utc)
-                    minutes = max(1, round((end_dt - start_dt).total_seconds() / 60))
-                except ValueError:
-                    minutes = 1
-            else:
-                minutes = 1
-            payload["minutes"] = minutes
             bucket["activities"].append(payload)
-            bucket["totalMinutes"] += minutes
+        elif row["kind"] == "boot":
+            bucket["boots"].append(payload)
 
     dates = sorted(by_date.keys(), reverse=True)
     page_dates = dates[:limit]

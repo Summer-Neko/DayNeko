@@ -56,8 +56,18 @@ function segmentStyle(start: string, end: string | undefined, now: number, range
   return { left: `${left}%`, width: `${Math.max(1.4, width)}%` };
 }
 
-export function TimePage({ activities, boots }: { activities: ActivityEntry[]; boots: BootEvent[] }) {
-  return <TimeDashboard activities={activities} boots={boots} title="时间地图" ownerLabel="我的" />;
+export function TimePage({
+  activities,
+  availableDates,
+  boots,
+  onDateChange
+}: {
+  activities: ActivityEntry[];
+  availableDates?: string[];
+  boots: BootEvent[];
+  onDateChange?: (date: string) => void;
+}) {
+  return <TimeDashboard activities={activities} availableDates={availableDates} boots={boots} title="时间地图" ownerLabel="我的" onDateChange={onDateChange} />;
 }
 
 export function TimeDashboard({
@@ -65,6 +75,7 @@ export function TimeDashboard({
   availableDates = [],
   boots,
   embedded = false,
+  onDateChange,
   ownerLabel,
   title
 }: {
@@ -72,6 +83,7 @@ export function TimeDashboard({
   availableDates?: string[];
   boots: BootEvent[];
   embedded?: boolean;
+  onDateChange?: (date: string) => void;
   ownerLabel: string;
   title: string;
 }) {
@@ -96,8 +108,17 @@ export function TimeDashboard({
   const [selectedDate, setSelectedDate] = React.useState(() => availableDates[0] ?? currentDate);
 
   React.useEffect(() => {
-    if (!dateChoices.includes(selectedDate)) setSelectedDate(dateChoices[0] ?? currentDate);
-  }, [currentDate, dateChoices, selectedDate]);
+    if (!dateChoices.includes(selectedDate)) {
+      const nextDate = dateChoices[0] ?? currentDate;
+      setSelectedDate(nextDate);
+      onDateChange?.(nextDate);
+    }
+  }, [currentDate, dateChoices, onDateChange, selectedDate]);
+
+  const handleDateChange = React.useCallback((date: string) => {
+    setSelectedDate(date);
+    onDateChange?.(date);
+  }, [onDateChange]);
 
   const dayStart = new Date(`${selectedDate}T00:00:00+08:00`).getTime();
   const rangeStart = dayStart;
@@ -158,7 +179,7 @@ export function TimeDashboard({
           <div className="time-axis-head">
             <div>
               <span className="section-kicker">Today</span>
-              <DateChoicePicker dates={dateChoices} label="查看日期" value={selectedDate} onChange={setSelectedDate} />
+              <DateChoicePicker dates={dateChoices} label="查看日期" value={selectedDate} onChange={handleDateChange} />
               <p></p>
             </div>
             <strong>{Math.round((rangeEnd - rangeStart) / 60 / 60 / 1000)}h</strong>

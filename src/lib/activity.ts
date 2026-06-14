@@ -12,13 +12,22 @@ export function classifyForegroundActivity(activity: ForegroundActivity): AutoAc
   const haystack = `${process} ${title}`;
 
   if (!process && !title) return null;
+  if (title.includes("leetcode") || title.includes("力扣") || haystack.includes("leetcode") || title.includes("牛客") || haystack.includes("nowcoder")) {
+    return { key: "game:leetcode", label: "正在刷题", mood: "学习中" };
+  }
+  if (title.includes("bilibili") || title.includes("哔哩哔哩") || haystack.includes("bilibili")) {
+    return { key: "game:bilibili", label: "正在看视频", mood: "娱乐中" };
+  }
+  if (haystack.includes("chrome") || haystack.includes("msedge") || haystack.includes("firefox")) {
+    return { key: "browse:web", label: "正在浏览网页", mood: "在线" };
+  }
   if (haystack.includes("yuanshen") || haystack.includes("genshin") || title.includes("原神")) {
     return { key: "game:genshin", label: "正在玩原神", mood: "游戏中" };
   }
   if (haystack.includes("wuthering") || haystack.includes("client-win64-shipping") || title.includes("鸣潮")) {
     return { key: "game:wuthering-waves", label: "正在玩鸣潮", mood: "游戏中" };
   }
-  if (haystack.includes("star rail") || title.includes("星穹铁道")) {
+  if (haystack.includes("starrail") || title.includes("星穹铁道")) {
     return { key: "game:star-rail", label: "正在玩星穹铁道", mood: "游戏中" };
   }
   if (haystack.includes("end field") || title.includes("终末地")) {
@@ -37,10 +46,16 @@ export function classifyForegroundActivity(activity: ForegroundActivity): AutoAc
     return { key: "game:arknights", label: "正在玩明日方舟", mood: "游戏中" };
   }
   if (haystack.includes("wechat") || title.includes("微信")){
-    return { key: "chating", label: "正在聊天", mood: "聊天中" };
+    return { key: "chatting", label: "正在聊天", mood: "聊天中" };
   }
   if (haystack.includes("deltaforce") || title.includes("三角洲行动")) {
     return { key: "game:delta-force", label: "正在玩三角洲行动", mood: "游戏中" };
+  }
+  if (haystack.includes("cs2") || title.includes("counter-strike 2") || title.includes("反恐精英2") || haystack.includes("csgo") || title.includes("反恐精英：全球攻势")) {
+    return { key: "game:cs2", label: "正在玩CS", mood: "游戏中" };
+  }
+  if (haystack.includes("league of legends") || process.includes("leagueclient") || title.includes("league of legends") || title.includes("英雄联盟")) {
+    return { key: "game:lol", label: "正在玩英雄联盟", mood: "游戏中" };
   }
   if (
     haystack.includes("cloudmusic") ||
@@ -51,11 +66,8 @@ export function classifyForegroundActivity(activity: ForegroundActivity): AutoAc
   ) {
     return { key: `music:${process || "player"}`, label: "正在听歌", mood: "听歌" };
   }
-  if (haystack.includes("code") || haystack.includes("cursor") || title.includes("visual studio code") || title.includes("pycharm") || title.includes("IDEA"))  {
+  if (haystack.includes("code") || haystack.includes("cursor") || title.includes("visual studio code") || title.includes("pycharm") || title.includes("idea") || title.includes("intellij"))  {
     return { key: "work:code", label: "正在写代码", mood: "专注" };
-  }
-  if (haystack.includes("chrome") || haystack.includes("msedge") || haystack.includes("firefox")) {
-    return { key: "browse:web", label: "正在浏览网页", mood: "在线" };
   }
   return null;
 }
