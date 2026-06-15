@@ -266,7 +266,15 @@ def upsert_record(conn: sqlite3.Connection, user_id: str, kind: str, row_id: str
                 if existing.get("deleted") or existing.get("isTemplate") or (existing.get("repeatDaily") and not existing.get("templateId")):
                     continue
                 if (existing.get("title") or "").strip().lower() == title and existing.get("date") == date:
-                    raise HTTPException(status_code=409, detail="duplicate event title for this date")
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "duplicate_event_title",
+                            "title": payload.get("title") or "",
+                            "date": date,
+                            "conflictId": row["id"],
+                        },
+                    )
     conn.execute(
         """
         insert into records (id, user_id, kind, payload, updated_at)
