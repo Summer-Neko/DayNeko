@@ -947,6 +947,15 @@ fn get_default_data_dir() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_system_username() -> Option<String> {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[tauri::command]
 fn choose_data_dir(current_dir: String) -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
     {
@@ -1118,6 +1127,7 @@ pub fn run() {
             set_close_to_tray,
             get_foreground_activity,
             get_machine_key,
+            get_system_username,
             get_default_data_dir,
             choose_data_dir,
             save_local_state,

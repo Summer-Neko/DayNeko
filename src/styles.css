@@ -2514,6 +2514,16 @@ textarea {
   box-shadow: none;
 }
 
+.primary-button.accent-soft {
+  color: var(--accent-ink);
+  background: rgba(var(--accent-rgb), 0.22);
+  box-shadow: 0 12px 26px rgba(var(--accent-rgb), 0.12);
+}
+
+.primary-button.accent-soft:hover {
+  background: rgba(var(--accent-rgb), 0.32);
+}
+
 .update-window-card > .muted {
   padding: 0 24px;
   font-size: 14px;
@@ -3221,7 +3231,7 @@ textarea {
   border-radius: 8px;
   background: var(--panel-strong);
   color: var(--muted);
-  content: "Ctrl+V 粘贴图片到这里，或用下方按钮选择图片";
+  content: "在这里粘贴图片或点击选择文件";
   text-align: center;
 }
 

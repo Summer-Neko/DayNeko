@@ -64,10 +64,6 @@ export function EvidenceUploadDialog({
         </button>
         <footer>
           <span>{draft.name}</span>
-          <label className="file-button compact-file">
-            选择图片
-            <input type="file" accept="image/*" onChange={(event) => void onFile(event.currentTarget.files)} />
-          </label>
           <button className="primary-button" disabled={!draft.dataUrl} onClick={onConfirm}>确认上传</button>
         </footer>
       </div>

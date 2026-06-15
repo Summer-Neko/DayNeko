@@ -98,18 +98,6 @@ export function AvatarCropDialog({
             }}
           />
         </div>
-        <label className="field crop-scale-field">
-          <span>缩放 {draft.scale.toFixed(2)}x</span>
-          <input
-            type="range"
-            min={1}
-            max={5}
-            step={0.05}
-            value={draft.scale}
-            onChange={(event) => update({ scale: Number(event.target.value) })}
-          />
-        </label>
-        <p className="muted crop-hint">滚轮缩放，拖动图片调整位置。最小缩放会始终填满头像框。</p>
         <footer>
           <button onClick={onClose}>取消</button>
           <button className="primary-button" onClick={() => void confirm()}>使用这个头像</button>

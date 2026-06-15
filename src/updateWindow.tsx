@@ -7,12 +7,23 @@ import { Download, RotateCcw } from "lucide-react";
 import { GlobalTooltip } from "./components/common/GlobalTooltip";
 import { WindowChrome } from "./components/common/WindowChrome";
 import { appVersion } from "./lib/config";
+import { hexToRgb } from "./lib/color";
 import { fetchGitHubReleaseNotes, markdownToHtml } from "./lib/update";
 import type { UpdateInfo } from "./types";
 import "./styles.css";
 
 const skippedUpdateVersionKey = "dayneko-skipped-update-version";
 const pendingUpdateInfoKey = "dayneko-pending-update-info";
+const sharedAccentColorKey = "dayneko-accent-color";
+
+function applyStoredAccentColor() {
+  const accentColor = localStorage.getItem(sharedAccentColorKey)?.trim();
+  if (!accentColor) return;
+  document.documentElement.style.setProperty("--accent", accentColor);
+  document.documentElement.style.setProperty("--accent-rgb", hexToRgb(accentColor));
+}
+
+applyStoredAccentColor();
 
 function readPendingUpdate() {
   const raw = localStorage.getItem(pendingUpdateInfoKey);
@@ -37,6 +48,15 @@ function UpdateWindow() {
   const [busy, setBusy] = React.useState(false);
   const [downloaded, setDownloaded] = React.useState(0);
   const [total, setTotal] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    applyStoredAccentColor();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === sharedAccentColorKey) applyStoredAccentColor();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   React.useEffect(() => {
     if (info) return;
@@ -134,8 +154,8 @@ function UpdateWindow() {
               {busy ? <RotateCcw size={16} /> : <Download size={16} />}
               {busy ? "更新中..." : "下载并重启更新"}
             </button>
-            <button className="primary-button subtle" disabled={busy || !info} onClick={skip}>跳过这个版本</button>
-            <button className="primary-button quiet" disabled={busy} onClick={close}>下次再提醒我</button>
+            <button className="primary-button accent-soft" disabled={busy || !info} onClick={skip}>跳过这个版本</button>
+            <button className="primary-button accent-soft" disabled={busy} onClick={close}>下次再提醒我</button>
           </footer>
         </section>
         <GlobalTooltip />

@@ -142,7 +142,6 @@ export type LeaderboardEntry = {
 export type AppState = {
   user: UserProfile;
   cloudSession?: {
-    serverUrl: string;
     machineKey: string;
     loggedInAt: string;
   };

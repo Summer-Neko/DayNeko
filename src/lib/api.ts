@@ -15,6 +15,25 @@ import type {
 } from "../types";
 import { serverConfigUrl } from "./config";
 
+export class ApiError extends Error {
+  status: number;
+  detail: unknown;
+
+  constructor(message: string, status: number, detail: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+async function apiError(response: Response, fallback: string) {
+  const body = await response.json().catch(() => null);
+  const detail = body && typeof body === "object" && "detail" in body ? (body as { detail?: unknown }).detail : null;
+  const message = typeof detail === "string" ? detail : fallback;
+  return new ApiError(message, response.status, detail);
+}
+
 export function normalizeServerUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "http://127.0.0.1:8787";
@@ -29,7 +48,7 @@ export async function syncChanges(settings: AppSettings, user: UserProfile, chan
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user, changes })
   });
-  if (!response.ok) throw new Error(`sync failed: ${response.status}`);
+  if (!response.ok) throw await apiError(response, `sync failed: ${response.status}`);
   return response.json() as Promise<{ records: number }>;
 }
 
@@ -47,7 +66,7 @@ export async function syncPresence(settings: AppSettings, user: UserProfile, pre
       }]
     })
   });
-  if (!response.ok) throw new Error(`presence sync failed: ${response.status}`);
+  if (!response.ok) throw await apiError(response, `presence sync failed: ${response.status}`);
   return response.json() as Promise<{ records: number }>;
 }
 

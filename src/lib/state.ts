@@ -19,7 +19,7 @@ export function applyUserIdToLocalData(state: AppState, userId: string): AppStat
 export function initialState(): AppState {
   const userId = "local-neko";
   return {
-    user: { id: userId, name: "Sunme", handle: "@dayneko" },
+    user: { id: userId, name: "neko", handle: "@dayneko" },
     settings: {
       serverUrl: defaultServerUrl,
       autoStart: false,
@@ -28,7 +28,7 @@ export function initialState(): AppState {
       theme: "light",
       language: "zh-CN",
       fontSize: "large",
-      accentColor: "#c9a5a5",
+      accentColor: "#9fc9c7",
       dataPath: defaultDataPath,
       backgroundBrightness: 86,
       cardOpacity: 74,
@@ -60,6 +60,12 @@ export function migrateState(raw: string): AppState {
     ...base,
     ...parsed,
     user: { ...base.user, ...(parsed.user ?? {}) },
+    cloudSession: parsed.cloudSession
+      ? {
+          machineKey: parsed.cloudSession.machineKey,
+          loggedInAt: parsed.cloudSession.loggedInAt
+        }
+      : undefined,
     settings: { ...base.settings, ...(parsed.settings ?? {}) },
     dirtyQueue: parsed.dirtyQueue ?? [],
     boots: (parsed.boots ?? []).map((boot) => ({ ...boot, updatedAt: boot.updatedAt ?? boot.startedAt })),

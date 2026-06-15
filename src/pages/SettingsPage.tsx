@@ -318,7 +318,7 @@ export function SettingsPage({
                 <input type="file" accept="image/*" onChange={(event) => void setBackground(event.currentTarget.files)} />
               </label>
               <button
-                className="primary-button subtle"
+                className="primary-button accent-soft"
                 type="button"
                 onClick={() => update({ background: undefined, backgroundBrightness: 86, cardOpacity: 74, cardBlur: 18, cardShadow: 11 })}
               >

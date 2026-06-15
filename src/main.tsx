@@ -38,6 +38,7 @@ import {
   type LocalDataSnapshot
 } from "./lib/localRecords";
 import {
+  ApiError,
   actOnFriendRequest,
   authDevice,
   fetchServerConfig,
@@ -98,6 +99,7 @@ import { useTicker } from "./hooks/useTicker";
 
 const skippedUpdateVersionKey = "dayneko-skipped-update-version";
 const pendingUpdateInfoKey = "dayneko-pending-update-info";
+const sharedAccentColorKey = "dayneko-accent-color";
 const legacyDevDataPath = "F:\\Project\\DayNeko\\data";
 const friendHomeRatingWindowDays = 7;
 
@@ -142,6 +144,18 @@ function isEmptyFriendRatingChange(record: DirtyRecord): boolean {
   return !rating.deleted && (!Array.isArray(rating.eventIds) || rating.eventIds.length === 0);
 }
 
+function duplicateEventConflict(error: unknown) {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  const detail = error.detail;
+  if (typeof detail === "object" && detail !== null && (detail as { code?: unknown }).code === "duplicate_event_title") {
+    const title = String((detail as { title?: unknown }).title ?? "").trim().toLowerCase();
+    const date = String((detail as { date?: unknown }).date ?? "").trim();
+    if (title && date) return { title, date };
+  }
+  if (/duplicate event title/i.test(error.message)) return { title: "", date: "" };
+  return null;
+}
+
 function App() {
   const appShellRef = React.useRef<HTMLElement>(null);
   const currentBootIdRef = React.useRef("");
@@ -162,7 +176,7 @@ function App() {
   const [leaderboardEntries, setLeaderboardEntries] = React.useState<LeaderboardEntry[]>([]);
   const [leaderboardScope, setLeaderboardScope] = React.useState<LeaderboardScope>("7d");
   const [timeDates, setTimeDates] = React.useState<string[]>([]);
-  const [syncStatus, setSyncStatus] = useNotifiedStatus("等待自动同步", "同步", notifications.notify);
+  const [syncStatus, setSyncStatus] = React.useState("等待自动同步");
   const [serverStatus, setServerStatus] = useNotifiedStatus("尚未测试", "服务器", notifications.notify);
   const [loginStatus, setLoginStatus] = useNotifiedStatus("未登录服务器", "登录", notifications.notify);
   const [presence, setPresence] = React.useState<PresenceStatus>(() => buildPresenceStatus("local-neko", null, null));
@@ -175,6 +189,7 @@ function App() {
   const [updateBusy, setUpdateBusy] = React.useState(false);
   const [dataPathConflict, setDataPathConflict] = React.useState<{ path: string } | null>(null);
   const dataPathConflictResolver = React.useRef<((choice: DataPathConflictChoice) => void) | null>(null);
+  const runSyncRef = React.useRef<() => Promise<void>>(async () => undefined);
   const now = useTicker();
 
   const today = scheduleDateKey();
@@ -244,7 +259,15 @@ function App() {
     storageHydratedRef.current = true;
     void loadStoredState(state.settings.dataPath).then((stored) => {
       if (!stored) {
-        saveState(state);
+        void invoke<string | null>("get_system_username")
+          .then((systemName) => {
+            const name = systemName?.trim();
+            const initial = name ? { ...state, user: { ...state.user, name } } : state;
+            setState(initial);
+            setPresence((prev) => (prev.userId === initial.user.id ? prev : buildPresenceStatus(initial.user.id, null, null)));
+            saveState(initial);
+          })
+          .catch(() => saveState(state));
         return;
       }
       setState(stored);
@@ -255,7 +278,7 @@ function App() {
   React.useEffect(() => {
     if (!state.cloudSession) return;
     setLoginStatus("已登录本设备账号");
-    setServerStatus(`已连接服务器：${normalizeServerUrl(state.cloudSession.serverUrl || state.settings.serverUrl)}`);
+    setServerStatus(`当前服务器：${normalizeServerUrl(state.settings.serverUrl)}`);
   }, [setLoginStatus, setServerStatus, state.cloudSession, state.settings.serverUrl]);
 
   React.useEffect(() => {
@@ -477,12 +500,16 @@ function App() {
     if (!state.settings.autoDiscoverServer) return null;
     const serverUrl = await fetchServerConfig();
     setState((prev) => {
-      const next = { ...prev, settings: { ...prev.settings, serverUrl } };
+      const normalized = normalizeServerUrl(serverUrl);
+      const next = {
+        ...prev,
+        settings: { ...prev.settings, serverUrl: normalized }
+      };
       saveState(next);
       return next;
     });
     setServerStatus(`已获取最新服务器：${serverUrl}`);
-    return { ...state.settings, serverUrl };
+    return { ...state.settings, serverUrl: normalizeServerUrl(serverUrl) };
   }, [state.settings]);
 
   React.useEffect(() => {
@@ -532,32 +559,80 @@ function App() {
       return;
     }
     setSyncStatus(`同步 ${changes.length} 条更改...`);
-    try {
-      const syncPayloadChanges = await Promise.all(changes.map(serializeDirtyRecordForSync));
-      const result = await syncChanges(state.settings, state.user, syncPayloadChanges);
+    const syncPayloadChanges = await Promise.all(changes.map(serializeDirtyRecordForSync));
+    const clearDirtyChanges = (ids: Set<string>) => {
       setState((prev) => {
-        const syncedIds = new Set(changes.map((change) => change.id));
         const next = {
           ...prev,
-          dirtyQueue: prev.dirtyQueue.filter((change) => !syncedIds.has(change.id)),
+          dirtyQueue: prev.dirtyQueue.filter((change) => !ids.has(change.id)),
           lastSyncedAt: nowIso()
         };
         saveState(next);
         return next;
       });
+    };
+    const clearSyncedChanges = () => clearDirtyChanges(new Set(changes.map((change) => change.id)));
+    const clearDuplicateEventConflict = (error: unknown) => {
+      const conflict = duplicateEventConflict(error);
+      if (!conflict) return false;
+      const ids = new Set<string>();
+      const localEventKeys = new Map<string, string>();
+      localData.events.forEach((event) => {
+        if ((event as CustomEvent & { deleted?: boolean }).deleted || isDailyTemplate(event)) return;
+        const key = `${event.date}::${event.title.trim().toLowerCase()}`;
+        if (!localEventKeys.has(key)) localEventKeys.set(key, event.id);
+      });
+      changes.forEach((change) => {
+        if (change.kind !== "event" || typeof change.payload !== "object" || change.payload === null) return;
+        const event = change.payload as CustomEvent & { deleted?: boolean };
+        if (event.deleted || isDailyTemplate(event)) return;
+        const key = `${event.date}::${event.title.trim().toLowerCase()}`;
+        const matchesServerConflict = conflict.title ? event.title.trim().toLowerCase() === conflict.title && event.date === conflict.date : false;
+        const conflictsWithLocalEvent = localEventKeys.has(key) && localEventKeys.get(key) !== event.id;
+        if (matchesServerConflict || conflictsWithLocalEvent) ids.add(change.id);
+      });
+      if (ids.size === 0) return false;
+      clearDirtyChanges(ids);
+      const label = conflict.title && conflict.date ? `「${conflict.title}」(${conflict.date})` : "同日同名日程";
+      setSyncStatus(`同步冲突：已跳过重复日程 ${label}`);
+      notifications.notify(`服务器拒绝了重复日程 ${label}，已跳过对应增量记录。`, { title: "同步", kind: "warning" });
+      return true;
+    };
+    try {
+      const result = await syncChanges(state.settings, state.user, syncPayloadChanges);
+      clearSyncedChanges();
       await refreshFriends();
       if (selectedFriendData) await loadFriendDays(selectedFriendData.id);
       setSyncStatus(`已自动同步 ${result.records} 条`);
-    } catch {
-      setSyncStatus("服务器离线，保留增量队列");
+    } catch (error) {
+      if (clearDuplicateEventConflict(error)) return;
+      try {
+        setSyncStatus("同步失败，正在获取最新服务器...");
+        const discovered = await discoverServer();
+        if (!discovered) throw new Error("server discovery disabled");
+        const result = await syncChanges(discovered, state.user, syncPayloadChanges);
+        clearSyncedChanges();
+        await refreshFriends();
+        if (selectedFriendData) await loadFriendDays(selectedFriendData.id);
+        setSyncStatus(`已切换到最新服务器并同步 ${result.records} 条`);
+      } catch (retryError) {
+        if (clearDuplicateEventConflict(retryError)) return;
+        setSyncStatus("服务器离线，保留增量队列");
+        notifications.notify("服务器离线，增量同步已保留到本地队列。", { title: "同步", kind: "warning" });
+      }
     }
-  }, [loadFriendDays, refreshFriends, selectedFriendData, state.cloudSession, state.dirtyQueue, state.settings, state.user]);
+  }, [discoverServer, loadFriendDays, localData.events, notifications.notify, refreshFriends, selectedFriendData, state.cloudSession, state.dirtyQueue, state.settings, state.user]);
+
+  React.useEffect(() => {
+    runSyncRef.current = runSync;
+  }, [runSync]);
 
   React.useEffect(() => {
     document.documentElement.dataset.theme = state.settings.theme;
     document.documentElement.dataset.fontSize = state.settings.fontSize;
     document.documentElement.style.setProperty("--accent", state.settings.accentColor);
     document.documentElement.style.setProperty("--accent-rgb", hexToRgb(state.settings.accentColor));
+    localStorage.setItem(sharedAccentColorKey, state.settings.accentColor);
     document.documentElement.style.setProperty("--bg-brightness", `${state.settings.backgroundBrightness}%`);
     document.documentElement.style.setProperty("--card-opacity", `${state.settings.cardOpacity / 100}`);
     document.documentElement.style.setProperty("--card-strong-opacity", `${Math.min(0.98, (state.settings.cardOpacity + 16) / 100)}`);
@@ -645,9 +720,9 @@ function App() {
   }, []);
 
   React.useEffect(() => {
-    const interval = window.setInterval(() => void runSync(), state.settings.syncIntervalSeconds * 1000);
+    const interval = window.setInterval(() => void runSyncRef.current(), state.settings.syncIntervalSeconds * 1000);
     return () => window.clearInterval(interval);
-  }, [runSync, state.settings.syncIntervalSeconds]);
+  }, [state.settings.syncIntervalSeconds]);
 
   React.useEffect(() => {
     setPresence((prev) => (prev.userId === state.user.id ? prev : { ...prev, id: `${state.user.id}:presence`, userId: state.user.id }));
@@ -961,7 +1036,6 @@ function App() {
           settings: { ...adopted.settings, serverUrl: normalizeServerUrl(serverUrl) },
           user: result.user,
           cloudSession: {
-            serverUrl: normalizeServerUrl(serverUrl),
             machineKey: result.machineKey,
             loggedInAt: nowIso()
           },
@@ -1201,6 +1275,7 @@ function App() {
   };
 
   const openUpdateWindow = async (info: UpdateInfo) => {
+    localStorage.setItem(sharedAccentColorKey, state.settings.accentColor);
     localStorage.setItem(pendingUpdateInfoKey, JSON.stringify(info));
     const existing = await WebviewWindow.getByLabel("update-prompt");
     if (existing) {

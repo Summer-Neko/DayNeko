@@ -1,7 +1,7 @@
 import type { Page, Rank } from "../types";
 
 export const defaultServerUrl = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8787";
-export const appVersion = "0.1.1";
+export const appVersion = "0.1.3";
 export const githubRepo = "Summer-Neko/DayNeko";
 export const serverConfigUrl = "https://raw.githubusercontent.com/Summer-Neko/utils/main/tools/config/daynekoServer.json";
 export const defaultDataPath = "";
