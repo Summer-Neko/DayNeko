@@ -4,7 +4,7 @@ export type Language = "zh-CN" | "en-US";
 export type FontSize = "small" | "medium" | "large";
 export type Rank = "SSS" | "S" | "A" | "B" | "C";
 export type LeaderboardScope = "7d" | "all";
-export type DirtyKind = "user" | "boot" | "activity" | "event" | "friend" | "friend-rating" | "presence";
+export type DirtyKind = "user" | "boot" | "activity" | "event" | "daily-template" | "friend" | "friend-rating" | "presence";
 
 export type UserProfile = {
   id: string;

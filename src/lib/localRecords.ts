@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ActivityEntry, BootEvent, CustomEvent, FriendRating } from "../types";
 
-export type LocalRecordKind = "event" | "activity" | "boot" | "friend-rating";
+export type LocalRecordKind = "event" | "daily-template" | "activity" | "boot" | "friend-rating";
 
 export type LocalDataSnapshot = {
   events: CustomEvent[];
+  dailyTemplates: CustomEvent[];
   activities: ActivityEntry[];
   boots: BootEvent[];
   friendRatings: FriendRating[];
@@ -20,7 +21,7 @@ async function loadLocalView<T>(command: string, args: Record<string, unknown>):
   return JSON.parse(raw) as T;
 }
 
-export async function loadHomeData(dataPath: string, date: string, userId: string): Promise<Pick<LocalDataSnapshot, "events" | "activities" | "boots" | "friendRatings">> {
+export async function loadHomeData(dataPath: string, date: string, userId: string): Promise<Pick<LocalDataSnapshot, "events" | "dailyTemplates" | "activities" | "boots" | "friendRatings">> {
   return loadLocalView("load_local_home_data", {
     dataDir: dataPath.trim(),
     date,
@@ -28,7 +29,7 @@ export async function loadHomeData(dataPath: string, date: string, userId: strin
   });
 }
 
-export async function loadScheduleData(dataPath: string, userId: string, limit = 500): Promise<Pick<LocalDataSnapshot, "events" | "friendRatings">> {
+export async function loadScheduleData(dataPath: string, userId: string, limit = 500): Promise<Pick<LocalDataSnapshot, "events" | "dailyTemplates" | "friendRatings">> {
   return loadLocalView("load_local_schedule_data", {
     dataDir: dataPath.trim(),
     userId,

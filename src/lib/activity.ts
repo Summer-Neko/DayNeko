@@ -13,49 +13,49 @@ export function classifyForegroundActivity(activity: ForegroundActivity): AutoAc
 
   if (!process && !title) return null;
   if (title.includes("leetcode") || title.includes("力扣") || haystack.includes("leetcode") || title.includes("牛客") || haystack.includes("nowcoder")) {
-    return { key: "game:leetcode", label: "正在刷题", mood: "学习中" };
+    return { key: "game:leetcode", label: "刷题", mood: "学习中" };
   }
   if (title.includes("bilibili") || title.includes("哔哩哔哩") || haystack.includes("bilibili")) {
-    return { key: "game:bilibili", label: "正在看视频", mood: "娱乐中" };
+    return { key: "game:bilibili", label: "看视频", mood: "娱乐中" };
   }
   if (haystack.includes("chrome") || haystack.includes("msedge") || haystack.includes("firefox")) {
-    return { key: "browse:web", label: "正在浏览网页", mood: "在线" };
+    return { key: "browse:web", label: "浏览网页", mood: "游历中" };
   }
   if (haystack.includes("yuanshen") || haystack.includes("genshin") || title.includes("原神")) {
-    return { key: "game:genshin", label: "正在玩原神", mood: "游戏中" };
+    return { key: "game:genshin", label: "原神", mood: "游戏中" };
   }
   if (haystack.includes("wuthering") || haystack.includes("client-win64-shipping") || title.includes("鸣潮")) {
-    return { key: "game:wuthering-waves", label: "正在玩鸣潮", mood: "游戏中" };
+    return { key: "game:wuthering-waves", label: "鸣潮", mood: "游戏中" };
   }
   if (haystack.includes("starrail") || title.includes("星穹铁道")) {
-    return { key: "game:star-rail", label: "正在玩星穹铁道", mood: "游戏中" };
+    return { key: "game:star-rail", label: "星穹铁道", mood: "游戏中" };
   }
   if (haystack.includes("end field") || title.includes("终末地")) {
-    return { key: "game:end-field", label: "正在玩终末地", mood: "游戏中" };
+    return { key: "game:end-field", label: "终末地", mood: "游戏中" };
   }
   if (haystack.includes("zenlesszonezero") || title.includes("绝区零")) {
-    return { key: "game:zenless-zone-zero", label: "正在玩绝区零", mood: "游戏中" };
+    return { key: "game:zenless-zone-zero", label: "绝区零", mood: "游戏中" };
   }
   if (haystack.includes("mumu") || title.includes("mumu安卓设备") || title.includes("mumu模拟器")) {
-    return { key: "game:mumu", label: "正在玩手机游戏", mood: "游戏中" };
+    return { key: "game:mumu", label: "手机游戏", mood: "游戏中" };
   }
   if (title.includes("异环")) {
-    return { key: "game:nte", label: "正在玩异环", mood: "游戏中" };
+    return { key: "game:nte", label: "异环", mood: "游戏中" };
   }
   if (haystack.includes("arknights") || title.includes("明日方舟") || title.includes("arknights")) {
-    return { key: "game:arknights", label: "正在玩明日方舟", mood: "游戏中" };
+    return { key: "game:arknights", label: "明日方舟", mood: "游戏中" };
   }
   if (haystack.includes("wechat") || title.includes("微信")){
-    return { key: "chatting", label: "正在聊天", mood: "聊天中" };
+    return { key: "chatting", label: "聊天", mood: "聊天中" };
   }
   if (haystack.includes("deltaforce") || title.includes("三角洲行动")) {
-    return { key: "game:delta-force", label: "正在玩三角洲行动", mood: "游戏中" };
+    return { key: "game:delta-force", label: "三角洲行动", mood: "游戏中" };
   }
   if (haystack.includes("cs2") || title.includes("counter-strike 2") || title.includes("反恐精英2") || haystack.includes("csgo") || title.includes("反恐精英：全球攻势")) {
-    return { key: "game:cs2", label: "正在玩CS", mood: "游戏中" };
+    return { key: "game:cs2", label: "CS", mood: "游戏中" };
   }
   if (haystack.includes("league of legends") || process.includes("leagueclient") || title.includes("league of legends") || title.includes("英雄联盟")) {
-    return { key: "game:lol", label: "正在玩英雄联盟", mood: "游戏中" };
+    return { key: "game:lol", label: "英雄联盟", mood: "游戏中" };
   }
   if (
     haystack.includes("cloudmusic") ||
@@ -64,10 +64,10 @@ export function classifyForegroundActivity(activity: ForegroundActivity): AutoAc
     title.includes("网易云音乐") ||
     title.includes("qq音乐")
   ) {
-    return { key: `music:${process || "player"}`, label: "正在听歌", mood: "听歌" };
+    return { key: `music:${process || "player"}`, label: "听歌", mood: "听歌" };
   }
   if (haystack.includes("code") || haystack.includes("cursor") || title.includes("visual studio code") || title.includes("pycharm") || title.includes("idea") || title.includes("intellij"))  {
-    return { key: "work:code", label: "正在写代码", mood: "专注" };
+    return { key: "work:code", label: "写代码", mood: "专注" };
   }
   return null;
 }

@@ -105,6 +105,7 @@ const friendHomeRatingWindowDays = 7;
 
 const emptyLocalData = (): LocalDataSnapshot => ({
   events: [],
+  dailyTemplates: [],
   activities: [],
   boots: [],
   friendRatings: []
@@ -313,9 +314,16 @@ function App() {
   React.useEffect(() => {
     if (page !== "events") return;
     void loadScheduleData(state.settings.dataPath, state.user.id)
+      .then(async (scheduleData) => {
+        if (!state.cloudSession) return scheduleData;
+        const snapshot = await fetchUserSnapshot(state.settings, state.user.id).catch(() => null);
+        const friendRatings = snapshot?.friendRatings ?? scheduleData.friendRatings;
+        friendRatings.forEach((rating) => void saveLocalRecord(state.settings.dataPath, "friend-rating", rating, state.user.id));
+        return { ...scheduleData, friendRatings };
+      })
       .then(mergeLocalData)
       .catch(() => undefined);
-  }, [mergeLocalData, page, state.settings.dataPath, state.user.id]);
+  }, [mergeLocalData, page, state.cloudSession, state.settings, state.user.id]);
 
   React.useEffect(() => {
     if (page !== "time") return;
@@ -410,8 +418,8 @@ function App() {
     patchState((prev) => prev, dirty);
   };
 
-  const createDailyInstancesForToday = React.useCallback((events: CustomEvent[]) => {
-    const templates = events.filter((event) => isDailyTemplate(event) && event.date <= today);
+  const createDailyInstancesForToday = React.useCallback((events: CustomEvent[], dailyTemplates: CustomEvent[]) => {
+    const templates = dailyTemplates.filter((event) => event.date <= today);
     if (templates.length === 0) return { events, created: [] as CustomEvent[] };
     const existingKeys = new Set(events.filter((event) => !isDailyTemplate(event)).map((event) =>
       event.templateId ? `template:${event.templateId}:${event.date}` : `title:${event.title.trim().toLowerCase()}:${event.date}`
@@ -423,7 +431,7 @@ function App() {
       if (existingKeys.has(templateKey) || existingKeys.has(titleKey)) return;
       const timestamp = nowIso();
       const event: CustomEvent = {
-        id: completed ? `${template.id}:${date}` : uid(),
+        id: `${template.id}:${date}`,
         userId: stateRef.current.user.id,
         title: template.title,
         description: template.description,
@@ -447,12 +455,12 @@ function App() {
   }, [today]);
 
   React.useEffect(() => {
-    const result = createDailyInstancesForToday(localData.events);
+    const result = createDailyInstancesForToday(localData.events, localData.dailyTemplates);
     if (result.created.length === 0) return;
     setLocalData((prev) => ({ ...prev, events: result.events }));
     result.created.forEach((event) => void saveLocalRecord(stateRef.current.settings.dataPath, "event", event, stateRef.current.user.id));
     enqueueDirty(result.created.map((event) => markDirty("event", event.id, event)));
-  }, [createDailyInstancesForToday, localData.events]);
+  }, [createDailyInstancesForToday, localData.dailyTemplates, localData.events]);
 
   const refreshFriends = React.useCallback(async () => {
     if (!state.cloudSession) {
@@ -909,12 +917,13 @@ function App() {
     };
     const instance: CustomEvent = {
       ...event,
+      id: `${template.id}:${today}`,
       templateId: template.id
     };
-    setLocalData((prev) => ({ ...prev, events: [instance, template, ...prev.events] }));
-    void saveLocalRecord(state.settings.dataPath, "event", template, state.user.id);
+    setLocalData((prev) => ({ ...prev, events: [instance, ...prev.events], dailyTemplates: [template, ...prev.dailyTemplates] }));
+    void saveLocalRecord(state.settings.dataPath, "daily-template", template, state.user.id);
     void saveLocalRecord(state.settings.dataPath, "event", instance, state.user.id);
-    enqueueDirty([markDirty("event", template.id, template), markDirty("event", instance.id, instance)]);
+    enqueueDirty([markDirty("daily-template", template.id, template), markDirty("event", instance.id, instance)]);
     return true;
   };
 
@@ -970,37 +979,25 @@ function App() {
 
   const removeEvent = (event: CustomEvent) => {
     if (!canEditEvent(event, today)) return;
-    const template = event.templateId ? localData.events.find((item) => item.id === event.templateId) : null;
-    const deletedTemplate = template ? { ...template, deleted: true, updatedAt: nowIso() } : null;
     const deletedEvent = { ...event, deleted: true, updatedAt: nowIso() };
     setLocalData((prev) => ({
       ...prev,
-      events: prev.events.filter((item) => item.id !== event.id && item.id !== event.templateId)
+      events: prev.events.filter((item) => item.id !== event.id)
     }));
-    if (deletedTemplate) {
-      void deleteLocalRecord(state.settings.dataPath, "event", deletedTemplate.id);
-    }
     void deleteLocalRecord(state.settings.dataPath, "event", event.id);
-    enqueueDirty([
-      ...(deletedTemplate ? [markDirty("event", deletedTemplate.id, deletedTemplate)] : []),
-      markDirty("event", event.id, deletedEvent)
-    ]);
+    enqueueDirty([markDirty("event", event.id, deletedEvent)]);
   };
 
   const removeDailyTemplate = (template: CustomEvent) => {
-    const todayInstances = localData.events.filter((event) => event.templateId === template.id && event.date === today);
     const deletedTemplate = { ...template, deleted: true, updatedAt: nowIso() };
-    const deletedInstances = todayInstances.map((event) => ({ ...event, deleted: true, updatedAt: nowIso() }));
     setLocalData((prev) => ({
       ...prev,
-      events: prev.events.filter((event) => event.id !== template.id && !todayInstances.some((item) => item.id === event.id))
+      dailyTemplates: prev.dailyTemplates.filter((event) => event.id !== template.id),
+      events: prev.events.filter((event) => event.id !== template.id)
     }));
+    void deleteLocalRecord(state.settings.dataPath, "daily-template", template.id);
     void deleteLocalRecord(state.settings.dataPath, "event", template.id);
-    todayInstances.forEach((event) => void deleteLocalRecord(state.settings.dataPath, "event", event.id));
-    enqueueDirty([
-      markDirty("event", template.id, deletedTemplate),
-      ...deletedInstances.map((event) => markDirty("event", event.id, event))
-    ]);
+    enqueueDirty([markDirty("daily-template", template.id, deletedTemplate), markDirty("event", template.id, deletedTemplate)]);
   };
 
   const loginToServer = async () => {
@@ -1011,6 +1008,7 @@ function App() {
         boots: localData.boots.map((item) => ({ ...item, userId: result.user.id })),
         activities: localData.activities.map((item) => ({ ...item, userId: result.user.id })),
         events: localData.events.map((item) => ({ ...item, userId: result.user.id })),
+        dailyTemplates: localData.dailyTemplates.map((item) => ({ ...item, userId: result.user.id })),
         friendRatings: localData.friendRatings.map((item) => (
           item.raterFriendId === state.user.id ? { ...item, raterFriendId: result.user.id } : item
         ))
@@ -1020,6 +1018,7 @@ function App() {
         ...adoptedLocal.boots.map((item) => ({ kind: "boot" as const, item })),
         ...adoptedLocal.activities.map((item) => ({ kind: "activity" as const, item })),
         ...adoptedLocal.events.map((item) => ({ kind: "event" as const, item })),
+        ...adoptedLocal.dailyTemplates.map((item) => ({ kind: "daily-template" as const, item })),
         ...adoptedLocal.friendRatings.map((item) => ({ kind: "friend-rating" as const, item }))
       ].forEach(({ kind, item }) => void saveLocalRecord(state.settings.dataPath, kind, item, result.user.id));
       setState((prev) => {
@@ -1029,6 +1028,7 @@ function App() {
           ...adoptedLocal.boots.map((item) => markDirty("boot", item.id, item)),
           ...adoptedLocal.activities.map((item) => markDirty("activity", item.id, item)),
           ...adoptedLocal.events.map((item) => markDirty("event", item.id, item)),
+          ...adoptedLocal.dailyTemplates.map((item) => markDirty("daily-template", item.id, item)),
           ...adoptedLocal.friendRatings.map((item) => markDirty("friend-rating", item.id, item))
         ];
         const next = {
@@ -1390,7 +1390,7 @@ function App() {
           <EventsPage
             events={visibleEvents}
             allEvents={localData.events}
-            dailyTemplates={localData.events.filter((event) => isDailyTemplate(event))}
+            dailyTemplates={localData.dailyTemplates}
             ratings={receivedRatings}
             today={today}
             onAddEvent={addEvent}

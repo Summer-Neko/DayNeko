@@ -74,7 +74,7 @@ export function SettingsPage({
   const setBackground = async (files: FileList | null) => {
     const file = files?.[0];
     if (!file) return;
-    update({ background: await compressImage(file, 1800, 0.72) });
+    update({ background: await compressImage(file, 1800, 0.84) });
   };
   const jumpTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 

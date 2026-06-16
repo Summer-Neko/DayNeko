@@ -187,6 +187,7 @@ fn connect_local_db(data_dir: &str) -> Result<Connection, String> {
     let mut conn = Connection::open(dir.join("dayneko-local.db")).map_err(|err| err.to_string())?;
     init_local_db(&conn)?;
     migrate_state_blob(&mut conn)?;
+    migrate_daily_templates_once(&mut conn)?;
     Ok(conn)
 }
 
@@ -228,6 +229,13 @@ fn init_local_db(conn: &Connection) -> Result<(), String> {
         );
 
         create table if not exists events (
+            id text primary key,
+            user_id text not null,
+            payload text not null,
+            updated_at text not null
+        );
+
+        create table if not exists daily_templates (
             id text primary key,
             user_id text not null,
             payload text not null,
@@ -385,6 +393,7 @@ fn save_state_tables(conn: &mut Connection, state: &Value) -> Result<(), String>
     insert_payload_array(&tx, state, "boots", "boots", owner_user_id)?;
     insert_payload_array(&tx, state, "activities", "activities", owner_user_id)?;
     insert_payload_array(&tx, state, "events", "events", owner_user_id)?;
+    insert_payload_array(&tx, state, "dailyTemplates", "daily_templates", owner_user_id)?;
     insert_payload_array(&tx, state, "friends", "friends", owner_user_id)?;
     insert_payload_array(&tx, state, "friendRequests", "friend_requests", owner_user_id)?;
     insert_payload_array(&tx, state, "friendRatings", "friend_ratings", owner_user_id)?;
@@ -398,6 +407,7 @@ fn table_for_record_kind(kind: &str) -> Result<&'static str, String> {
         "boot" | "boots" => Ok("boots"),
         "activity" | "activities" => Ok("activities"),
         "event" | "events" => Ok("events"),
+        "daily-template" | "dailyTemplates" | "daily_templates" => Ok("daily_templates"),
         "friend" | "friends" => Ok("friends"),
         "friend-request" | "friendRequests" | "friend_requests" => Ok("friend_requests"),
         "friend-rating" | "friendRatings" | "friend_ratings" => Ok("friend_ratings"),
@@ -436,6 +446,40 @@ fn load_meta(conn: &Connection, key: &str) -> Result<Option<Value>, String> {
         .map_err(|err| err.to_string())?;
     raw.map(|value| serde_json::from_str(&value).map_err(|err| err.to_string()))
         .transpose()
+}
+
+fn migrate_daily_templates_once(conn: &mut Connection) -> Result<(), String> {
+    if load_meta(conn, "migration:daily_templates_v1")?.is_some() {
+        return Ok(());
+    }
+    let tx = conn.transaction().map_err(|err| err.to_string())?;
+    tx.execute(
+        "
+        insert into daily_templates (id, user_id, payload, updated_at)
+        select id, user_id, payload, updated_at
+        from events
+        where json_extract(payload, '$.isTemplate') = 1
+           or (json_extract(payload, '$.repeatDaily') = 1 and json_extract(payload, '$.templateId') is null)
+        on conflict(id) do update set
+            user_id=excluded.user_id,
+            payload=excluded.payload,
+            updated_at=excluded.updated_at
+        ",
+        [],
+    )
+    .map_err(|err| err.to_string())?;
+    tx.execute(
+        "
+        delete from events
+        where json_extract(payload, '$.isTemplate') = 1
+           or (json_extract(payload, '$.repeatDaily') = 1 and json_extract(payload, '$.templateId') is null)
+        ",
+        [],
+    )
+    .map_err(|err| err.to_string())?;
+    upsert_meta(&tx, "migration:daily_templates_v1", &json!({ "done": true, "updatedAt": chrono_like_now() }))?;
+    tx.commit().map_err(|err| err.to_string())?;
+    Ok(())
 }
 
 fn load_payload_array(conn: &Connection, table: &str) -> Result<Value, String> {
@@ -540,6 +584,22 @@ fn load_events_for_date(conn: &Connection, date: &str, limit: i64) -> Result<Val
         .map_err(|err| err.to_string())?;
     let rows = stmt
         .query_map(params![date, date, date, limit], |row| row.get::<_, String>(0))
+        .map_err(|err| err.to_string())?;
+    payload_rows_to_array(rows)
+}
+
+fn load_daily_templates(conn: &Connection, limit: i64) -> Result<Value, String> {
+    let mut stmt = conn
+        .prepare(
+            "
+            select payload from daily_templates
+            order by updated_at desc
+            limit ?
+            ",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![limit], |row| row.get::<_, String>(0))
         .map_err(|err| err.to_string())?;
     payload_rows_to_array(rows)
 }
@@ -721,6 +781,7 @@ fn load_local_home_data(data_dir: String, date: String, user_id: String) -> Resu
     let conn = connect_local_db(&data_dir)?;
     let mut value = Map::new();
     value.insert("events".to_string(), load_events_for_date(&conn, &date, 200)?);
+    value.insert("dailyTemplates".to_string(), load_daily_templates(&conn, 500)?);
     value.insert("boots".to_string(), load_payload_array_limited(&conn, "boots", 1)?);
     value.insert("activities".to_string(), load_payload_array_limited(&conn, "activities", 1)?);
     value.insert("friendRatings".to_string(), load_ratings_for_target(&conn, &user_id, 30)?);
@@ -733,6 +794,7 @@ fn load_local_schedule_data(data_dir: String, user_id: String, limit: Option<i64
     let bounded_limit = limit.unwrap_or(500).clamp(1, 5000);
     let mut value = Map::new();
     value.insert("events".to_string(), load_payload_array_limited(&conn, "events", bounded_limit)?);
+    value.insert("dailyTemplates".to_string(), load_daily_templates(&conn, bounded_limit)?);
     value.insert("friendRatings".to_string(), load_ratings_for_target(&conn, &user_id, bounded_limit)?);
     json_text(&Value::Object(value))
 }
