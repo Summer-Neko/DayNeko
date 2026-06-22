@@ -2,7 +2,9 @@
 
 DayNeko 是一个本地优先的日常记录桌面应用。它把「今天做了什么」「应用什么时候运行」「有哪些自定义日程」「好友当天完成情况与评分」放在一个轻量桌面端里，并提供 FastAPI + SQLite 后端用于好友、同步、排行榜和后台管理。
 
-## 页面展示
+## 页面示例展示
+<img width="1804" height="964" alt="image" src="https://github.com/user-attachments/assets/c6d087a5-e594-4820-8a7a-ae5ee7c6249d" />
+
 
 ## 当前能力
 
