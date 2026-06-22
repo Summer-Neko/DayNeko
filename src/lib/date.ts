@@ -10,6 +10,25 @@ export const scheduleDateKey = () => {
   return beijing.toISOString().slice(0, 10);
 };
 
+export const monthKey = (date = scheduleDateKey()) => date.slice(0, 7);
+
+export function shiftMonth(month: string, offset: number) {
+  const [yearText, monthText] = month.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return monthKey();
+  const date = new Date(Date.UTC(year, monthIndex + offset, 1));
+  return date.toISOString().slice(0, 7);
+}
+
+export function monthLabel(month: string) {
+  const [yearText, monthText] = month.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return month;
+  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(new Date(Date.UTC(year, monthIndex, 1)));
+}
+
 export const yesterdayKey = () => {
   const date = new Date(`${scheduleDateKey()}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() - 1);

@@ -8,6 +8,7 @@ import { GlobalTooltip } from "./components/common/GlobalTooltip";
 import { WindowChrome } from "./components/common/WindowChrome";
 import { appVersion } from "./lib/config";
 import { hexToRgb } from "./lib/color";
+import { installContextMenuGuard } from "./lib/contextMenu";
 import { fetchGitHubReleaseNotes, markdownToHtml } from "./lib/update";
 import type { UpdateInfo } from "./types";
 import "./styles.css";
@@ -48,6 +49,8 @@ function UpdateWindow() {
   const [busy, setBusy] = React.useState(false);
   const [downloaded, setDownloaded] = React.useState(0);
   const [total, setTotal] = React.useState<number | null>(null);
+
+  React.useEffect(() => installContextMenuGuard(), []);
 
   React.useEffect(() => {
     applyStoredAccentColor();

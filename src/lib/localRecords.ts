@@ -37,6 +37,22 @@ export async function loadScheduleData(dataPath: string, userId: string, limit =
   });
 }
 
+export async function loadScheduleMonthData(dataPath: string, userId: string, month: string): Promise<Pick<LocalDataSnapshot, "events" | "dailyTemplates" | "friendRatings">> {
+  return loadLocalView("load_local_schedule_month_data", {
+    dataDir: dataPath.trim(),
+    userId,
+    month
+  });
+}
+
+export async function ensureLocalDailyInstances(dataPath: string, userId: string, date: string): Promise<CustomEvent[]> {
+  return loadLocalView("ensure_local_daily_instances", {
+    dataDir: dataPath.trim(),
+    userId,
+    date
+  });
+}
+
 export async function loadTimeData(dataPath: string, limit = 1000): Promise<Pick<LocalDataSnapshot, "activities" | "boots">> {
   return loadLocalView("load_local_time_data", {
     dataDir: dataPath.trim(),
@@ -81,5 +97,13 @@ export function deleteLocalRecord(dataPath: string, kind: LocalRecordKind, id: s
     dataDir: dataPath.trim(),
     kind,
     id
+  }).catch(() => undefined);
+}
+
+export function deleteEvidenceImage(dataPath: string, filePath?: string) {
+  if (!filePath) return Promise.resolve();
+  return invoke("delete_evidence_image", {
+    dataDir: dataPath.trim(),
+    filePath
   }).catch(() => undefined);
 }

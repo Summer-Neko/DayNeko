@@ -191,6 +191,17 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def month_bounds(month: str) -> tuple[str, str]:
+    try:
+        start = datetime.strptime(month, "%Y-%m").date().replace(day=1)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid month")
+    if month > datetime.now(timezone.utc).strftime("%Y-%m"):
+        raise HTTPException(status_code=400, detail="future month is not allowed")
+    next_month = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
+    return start.isoformat(), next_month.isoformat()
+
+
 def is_data_url(value: str | None) -> bool:
     return bool(value and value.startswith("data:") and "," in value)
 
@@ -294,6 +305,100 @@ def save_media_asset(
     }
 
 
+def delete_media_asset_file(relative_path: str) -> None:
+    target = (MEDIA_ROOT / relative_path).resolve()
+    media_root = MEDIA_ROOT.resolve()
+    if not str(target).startswith(str(media_root)):
+        return
+    try:
+        target.unlink()
+    except FileNotFoundError:
+        return
+
+
+def delete_media_assets(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> None:
+    for row in rows:
+        delete_media_asset_file(row["file_path"])
+        conn.execute("delete from media_assets where id = ?", (row["id"],))
+
+
+def event_evidence_asset_id(user_id: str, event_id: str, image_id: str) -> str:
+    return f"evidence:{user_id}:{event_id}:{image_id}"
+
+
+def cleanup_event_media(conn: sqlite3.Connection, user_id: str, event_id: str, payload: dict[str, Any] | None = None) -> None:
+    keep_ids: set[str] | None = None
+    if payload is not None:
+        keep_ids = set()
+        evidence = payload.get("evidence")
+        if isinstance(evidence, list):
+            for image in evidence:
+                if not isinstance(image, dict):
+                    continue
+                image_id = image.get("id")
+                if image_id:
+                    keep_ids.add(event_evidence_asset_id(user_id, event_id, str(image_id)))
+
+    rows = conn.execute(
+        "select id, file_path from media_assets where owner_user_id = ? and record_id = ? and kind = 'evidence'",
+        (user_id, event_id),
+    ).fetchall()
+    if keep_ids is not None:
+        rows = [row for row in rows if row["id"] not in keep_ids]
+    delete_media_assets(conn, rows)
+
+
+def merge_event_evidence_for_upsert(conn: sqlite3.Connection, user_id: str, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if "evidence" not in payload and "deletedEvidenceIds" not in payload:
+        return payload
+
+    existing_row = conn.execute(
+        "select payload from records where id = ? and user_id = ? and kind = 'event'",
+        (event_id, user_id),
+    ).fetchone()
+    if not existing_row:
+        return {key: value for key, value in payload.items() if key != "deletedEvidenceIds"}
+
+    try:
+        existing_payload = json.loads(existing_row["payload"])
+    except json.JSONDecodeError:
+        return {key: value for key, value in payload.items() if key != "deletedEvidenceIds"}
+
+    existing_evidence = existing_payload.get("evidence")
+    incoming_evidence = payload.get("evidence")
+    deleted_ids = {
+        str(value)
+        for value in payload.get("deletedEvidenceIds", [])
+        if value is not None
+    } if isinstance(payload.get("deletedEvidenceIds"), list) else set()
+    if not isinstance(existing_evidence, list) or not isinstance(incoming_evidence, list):
+        return {key: value for key, value in payload.items() if key != "deletedEvidenceIds"}
+
+    if len(incoming_evidence) == 0 and existing_evidence and not deleted_ids:
+        next_payload = dict(payload)
+        next_payload["evidence"] = existing_evidence
+        next_payload.pop("deletedEvidenceIds", None)
+        return next_payload
+
+    incoming_ids = {
+        str(image.get("id"))
+        for image in incoming_evidence
+        if isinstance(image, dict) and image.get("id") is not None
+    }
+    preserved = [
+        image
+        for image in existing_evidence
+        if isinstance(image, dict)
+        and image.get("id") is not None
+        and str(image.get("id")) not in incoming_ids
+        and str(image.get("id")) not in deleted_ids
+    ]
+    next_payload = dict(payload)
+    next_payload["evidence"] = [*incoming_evidence, *preserved]
+    next_payload.pop("deletedEvidenceIds", None)
+    return next_payload
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(
@@ -359,7 +464,36 @@ def init_db() -> None:
         conn.execute("create index if not exists idx_records_updated_at on records(updated_at)")
         conn.execute("create index if not exists idx_media_owner on media_assets(owner_user_id, kind)")
         conn.execute("create index if not exists idx_media_record on media_assets(record_id, kind)")
+        migrate_daily_templates(conn)
         migrate_existing_media(conn)
+
+
+def is_legacy_daily_template(payload: dict[str, Any]) -> bool:
+    return bool(payload.get("isTemplate") or (payload.get("repeatDaily") and not payload.get("templateId")))
+
+
+def migrate_daily_templates(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("select id, user_id, payload, updated_at from records where kind = 'event'").fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or not is_legacy_daily_template(payload):
+            continue
+        conn.execute(
+            """
+            insert into records (id, user_id, kind, payload, updated_at)
+            values (?, ?, 'daily-template', ?, ?)
+            on conflict(id) do update set
+                user_id=excluded.user_id,
+                kind=excluded.kind,
+                payload=excluded.payload,
+                updated_at=excluded.updated_at
+            """,
+            (row["id"], row["user_id"], json.dumps(payload, ensure_ascii=False), row["updated_at"]),
+        )
+        conn.execute("delete from records where id = ? and user_id = ? and kind = 'event'", (row["id"], row["user_id"]))
 
 
 def normalize_user_media(conn: sqlite3.Connection, user_id: str, avatar: str | None) -> tuple[str | None, str | None]:
@@ -474,8 +608,13 @@ def hydrate_payload_for_response(payload: dict[str, Any], request: Request | Non
 
 def upsert_record(conn: sqlite3.Connection, user_id: str, kind: str, row_id: str, payload: dict[str, Any]) -> None:
     if payload.get("deleted"):
+        if kind == "event":
+            cleanup_event_media(conn, user_id, row_id)
         conn.execute("delete from records where id = ? and user_id = ? and kind = ?", (row_id, user_id, kind))
         return
+    if kind == "event":
+        payload = merge_event_evidence_for_upsert(conn, user_id, row_id, payload)
+        cleanup_event_media(conn, user_id, row_id, payload)
     payload = normalize_record_media(conn, user_id, kind, row_id, payload)
     if kind == "friend-rating" and not payload.get("eventIds"):
         raise HTTPException(status_code=400, detail="cannot rate empty schedule")
@@ -501,7 +640,7 @@ def upsert_record(conn: sqlite3.Connection, user_id: str, kind: str, row_id: str
                 """,
                 (json.dumps(existing, ensure_ascii=False), utc_now(), row["id"], user_id),
             )
-    if kind == "event" and not (payload.get("isTemplate") or (payload.get("repeatDaily") and not payload.get("templateId"))):
+    if kind == "event":
         title = (payload.get("title") or "").strip().lower()
         date = payload.get("date")
         if title and date:
@@ -511,7 +650,7 @@ def upsert_record(conn: sqlite3.Connection, user_id: str, kind: str, row_id: str
             ).fetchall()
             for row in rows:
                 existing = json.loads(row["payload"])
-                if existing.get("deleted") or existing.get("isTemplate") or (existing.get("repeatDaily") and not existing.get("templateId")):
+                if existing.get("deleted"):
                     continue
                 if (existing.get("title") or "").strip().lower() == title and existing.get("date") == date:
                     raise HTTPException(
@@ -895,7 +1034,15 @@ def snapshot(user_id: str, request: Request) -> dict[str, Any]:
     init_db()
     with connect() as conn:
         user_row = conn.execute("select * from users where id = ?", (user_id,)).fetchone()
-        rows = conn.execute("select kind, payload from records where user_id = ? order by updated_at desc", (user_id,)).fetchall()
+        rows = conn.execute(
+            """
+            select kind, payload from records
+            where user_id = ?
+               or (kind = 'friend-rating' and json_extract(payload, '$.targetUserId') = ?)
+            order by updated_at desc
+            """,
+            (user_id, user_id),
+        ).fetchall()
 
     grouped: dict[str, list[dict[str, Any]]] = {
         "boots": [],
@@ -935,21 +1082,57 @@ def snapshot(user_id: str, request: Request) -> dict[str, Any]:
 
 
 @app.get("/users/{user_id}/schedule")
-def user_schedule(user_id: str, request: Request, cursor: str | None = None, limit: int = 7) -> dict[str, Any]:
+def user_schedule(user_id: str, request: Request, cursor: str | None = None, limit: int = 7, month: str | None = None) -> dict[str, Any]:
     init_db()
     limit = max(1, min(limit, 30))
     with connect() as conn:
-        rows = conn.execute(
-            "select kind, payload from records where user_id = ? and kind in ('event', 'friend-rating', 'activity', 'boot')",
-            (user_id,),
-        ).fetchall()
+        if month:
+            start, end = month_bounds(month)
+            rows = conn.execute(
+                """
+                select kind, payload from records
+                where (
+                    user_id = ?
+                    and kind = 'event'
+                    and (
+                        (json_extract(payload, '$.date') >= ? and json_extract(payload, '$.date') < ?)
+                        or exists (
+                            select 1 from json_each(records.payload, '$.completedDates')
+                            where value >= ? and value < ?
+                        )
+                    )
+                ) or (
+                    kind = 'friend-rating'
+                    and json_extract(payload, '$.targetUserId') = ?
+                    and json_extract(payload, '$.date') >= ?
+                    and json_extract(payload, '$.date') < ?
+                ) or (
+                    user_id = ?
+                    and kind in ('activity', 'boot')
+                    and (
+                        (coalesce(json_extract(payload, '$.date'), substr(json_extract(payload, '$.startedAt'), 1, 10)) >= ?
+                         and coalesce(json_extract(payload, '$.date'), substr(json_extract(payload, '$.startedAt'), 1, 10)) < ?)
+                        or (substr(json_extract(payload, '$.endedAt'), 1, 10) >= ?
+                            and substr(json_extract(payload, '$.endedAt'), 1, 10) < ?)
+                    )
+                )
+                """,
+                (user_id, start, end, start, end, user_id, start, end, user_id, start, end, start, end),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                select kind, payload from records
+                where (user_id = ? and kind in ('event', 'activity', 'boot'))
+                   or (kind = 'friend-rating' and json_extract(payload, '$.targetUserId') = ?)
+                """,
+                (user_id, user_id),
+            ).fetchall()
 
     by_date: dict[str, dict[str, Any]] = {}
     for row in rows:
         payload = hydrate_payload_for_response(json.loads(row["payload"]), request)
         if payload.get("deleted"):
-            continue
-        if row["kind"] == "event" and (payload.get("isTemplate") or (payload.get("repeatDaily") and not payload.get("templateId"))):
             continue
         if row["kind"] == "friend-rating" and not payload.get("eventIds"):
             continue
@@ -970,8 +1153,8 @@ def user_schedule(user_id: str, request: Request, cursor: str | None = None, lim
             bucket["boots"].append(payload)
 
     dates = sorted(by_date.keys(), reverse=True)
-    page_dates = dates[:limit]
-    next_cursor = dates[limit] if len(dates) > limit else None
+    page_dates = dates if month else dates[:limit]
+    next_cursor = None if month else (dates[limit] if len(dates) > limit else None)
     return {
         "items": [by_date[date] for date in page_dates],
         "nextCursor": next_cursor,
@@ -1005,8 +1188,6 @@ def leaderboard(scope: Literal["7d", "all"] = "7d") -> dict[str, Any]:
         if payload.get("deleted"):
             continue
         if row["kind"] == "event":
-            if payload.get("isTemplate") or (payload.get("repeatDaily") and not payload.get("templateId")):
-                continue
             user_id = payload.get("userId")
             done_dates = payload.get("completedDates") or []
             if user_id:

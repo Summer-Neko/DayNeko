@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
+  ActivityEntry,
+  BootEvent,
   DeviceAuthResult,
   DirtyRecord,
   CustomEvent,
@@ -152,7 +154,10 @@ export async function fetchUserSnapshot(settings: AppSettings, userId: string) {
   const response = await fetch(`${normalizeServerUrl(settings.serverUrl)}/users/${userId}/snapshot`);
   if (!response.ok) throw new Error(`snapshot failed: ${response.status}`);
   return response.json() as Promise<{
+    activities?: ActivityEntry[];
+    boots?: BootEvent[];
     events?: CustomEvent[];
+    dailyTemplates?: CustomEvent[];
     friendRatings?: FriendRating[];
   }>;
 }

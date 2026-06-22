@@ -1,34 +1,45 @@
 import React from "react";
-import { CalendarCheck, ImagePlus, Plus, Trash2 } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { PanelTitle, Toggle } from "../components/ui";
+import { monthKey, monthLabel, shiftMonth } from "../lib/date";
 import { evidenceEntriesForDate } from "../lib/evidence";
 import { canEditEvent, eventsForDate, isRecurringEvent, scheduleDates } from "../lib/schedule";
-import type { CustomEvent, FriendRating } from "../types";
+import type { CustomEvent, Friend, FriendRating } from "../types";
 
 export function EventsPage(props: {
   events: CustomEvent[];
   allEvents: CustomEvent[];
   dailyTemplates: CustomEvent[];
+  friends: Friend[];
   ratings: FriendRating[];
+  month: string;
   today: string;
   onAddEvent: (title: string, repeatDaily: boolean) => boolean;
   onEvidence: (event: CustomEvent, files: FileList | null) => void;
   onOpenEvidence: (event: CustomEvent, index: number, date: string) => void;
+  onMonthChange: (month: string) => void;
+  onRemoveEvidence: (event: CustomEvent, imageId: string) => void;
   onStartEvidence: (event: CustomEvent) => void;
   onRemoveDailyTemplate: (event: CustomEvent) => void;
   onRemoveEvent: (event: CustomEvent) => void;
   onToggleEvent: (event: CustomEvent) => void;
 }) {
-  const dates = scheduleDates(props.allEvents, props.ratings);
-  const [visibleDays, setVisibleDays] = React.useState(30);
+  const monthRatings = props.ratings.filter((rating) => rating.date.startsWith(props.month));
+  const dates = scheduleDates(props.allEvents, monthRatings).filter((date) => date.startsWith(props.month));
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [eventTitle, setEventTitle] = React.useState("");
   const [repeatDaily, setRepeatDaily] = React.useState(false);
-  const visibleDates = dates.slice(0, visibleDays);
+  const friendNameById = React.useMemo(() => {
+    return new Map(props.friends.map((friend) => [friend.id, friend.name || friend.handle]));
+  }, [props.friends]);
+  const currentMonth = monthKey(props.today);
+  const canGoNextMonth = props.month < currentMonth;
+  const monthEventCount = props.allEvents.filter((event) => event.date.startsWith(props.month)).length;
+  const monthDoneCount = props.allEvents.filter((event) => event.completedDates.some((date) => date.startsWith(props.month))).length;
 
-  React.useEffect(() => {
-    setVisibleDays(30);
-  }, [props.allEvents.length, props.ratings.length]);
+  const raterName = (rating: FriendRating) => {
+    return friendNameById.get(rating.raterFriendId) ?? `好友 ${rating.raterFriendId.slice(0, 6)}`;
+  };
 
   const submitEvent = () => {
     const ok = props.onAddEvent(eventTitle, repeatDaily);
@@ -97,12 +108,40 @@ export function EventsPage(props: {
       )}
 
       <section className="workspace-panel">
-        <PanelTitle label="Schedule Logs" title="日程记录" icon={<CalendarCheck size={20} />} />
-        <p className="muted">今天也要元气满满</p>
+        <div className="schedule-log-head">
+          <div>
+            <PanelTitle label="Schedule Logs" title="日程记录" icon={<CalendarCheck size={20} />} />
+            <p className="muted">按月查看待办与好友评分，只读取当前月份的数据。</p>
+          </div>
+          <div className="schedule-month-control">
+            <button type="button" onClick={() => props.onMonthChange(shiftMonth(props.month, -1))} aria-label="上一月">
+              <ChevronLeft size={18} />
+            </button>
+            <strong>{monthLabel(props.month)}</strong>
+            <button
+              type="button"
+              disabled={!canGoNextMonth}
+              onClick={() => canGoNextMonth && props.onMonthChange(shiftMonth(props.month, 1))}
+              aria-label="下一月"
+            >
+              <ChevronRight size={18} />
+            </button>
+            {props.month !== currentMonth && (
+              <button className="schedule-month-today" type="button" onClick={() => props.onMonthChange(currentMonth)}>
+                本月
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="schedule-month-summary">
+          <span>{monthEventCount} 个待办</span>
+          <span>{monthDoneCount} 个完成记录</span>
+          <span>{monthRatings.length} 条好友评分</span>
+        </div>
         <div className="schedule-day-list">
-          {visibleDates.map((date) => {
+          {dates.map((date) => {
             const events = eventsForDate(props.allEvents, date);
-            const ratings = props.ratings.filter((rating) => rating.date === date);
+            const ratings = monthRatings.filter((rating) => rating.date === date);
             const isToday = date === props.today;
             return (
               <section className="schedule-day" key={date}>
@@ -114,61 +153,75 @@ export function EventsPage(props: {
                   </div>
                   {ratings[0] && <span className={`rank-badge rank-${ratings[0].rank}`}>{ratings[0].rank}</span>}
                 </div>
-                <div className="event-list rich">
-                  {events.map((event) => {
-                    const editable = canEditEvent(event, props.today) && isToday;
-                    const done = event.completedDates.includes(date);
-                    const evidenceEntries = evidenceEntriesForDate(event, date);
-                    return (
-                      <article className={`event-card ${done ? "done" : ""} ${editable ? "" : "locked"}`} key={`${date}-${event.id}`}>
-                        <div className="event-main">
+                <div className="schedule-day-scroll">
+                  <div className="event-list rich">
+                    {events.map((event) => {
+                      const editable = canEditEvent(event, props.today) && isToday;
+                      const done = event.completedDates.includes(date);
+                      const evidenceEntries = evidenceEntriesForDate(event, date);
+                      return (
+                        <article className={`event-card ${done ? "done" : ""} ${editable ? "" : "locked"}`} key={`${date}-${event.id}`}>
+                          <div className="event-main">
+                            <div>
+                              <strong>{event.title}</strong>
+                              <span>{isRecurringEvent(event) ? "每日循环" : "当天临时"} · 证据 {evidenceEntries.length} {editable ? "" : "· 已锁定"}</span>
+                            </div>
+                            <button className="done-control" disabled={!editable} onClick={() => props.onToggleEvent(event)}>
+                              <strong>{done ? "已完成" : "待完成"}</strong>
+                            </button>
+                          </div>
+                          <div className="event-actions">
+                            <button className={`icon-upload ${editable ? "" : "disabled"}`} disabled={!editable} onClick={() => props.onStartEvidence(event)}>
+                              <ImagePlus size={16} />
+                            </button>
+                            <button disabled={!editable} onClick={() => props.onRemoveEvent(event)}>
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                          {evidenceEntries.length > 0 && (
+                            <div className="evidence-strip">
+                              {evidenceEntries.map(({ image, index }) => (
+                                <div className="evidence-thumb" key={image.id}>
+                                  <button className="evidence-preview" type="button" onClick={() => props.onOpenEvidence(event, index, date)}>
+                                    <img src={image.dataUrl} alt={image.name} />
+                                  </button>
+                                  {editable && (
+                                    <button
+                                      className="evidence-remove"
+                                      type="button"
+                                      aria-label="删除证据图片"
+                                      onClick={() => props.onRemoveEvidence(event, image.id)}
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                    {events.length === 0 && <p className="empty">这天没有日程</p>}
+                  </div>
+                  {ratings.length > 0 && (
+                    <div className="schedule-rating-list">
+                      {ratings.map((rating) => (
+                        <article className="schedule-rating-card" key={rating.id}>
+                          <span className={`rank-badge rank-${rating.rank}`}>{rating.rank}</span>
                           <div>
-                            <strong>{event.title}</strong>
-                            <span>{isRecurringEvent(event) ? "每日循环" : "当天临时"} · 证据 {evidenceEntries.length} {editable ? "" : "· 已锁定"}</span>
+                            <strong>{raterName(rating)} · {rating.date}</strong>
+                            <p>{rating.comment}</p>
                           </div>
-                          <button className="done-control" disabled={!editable} onClick={() => props.onToggleEvent(event)}>
-                            <strong>{done ? "已完成" : "待完成"}</strong>
-                          </button>
-                        </div>
-                        <div className="event-actions">
-                          <button className={`icon-upload ${editable ? "" : "disabled"}`} disabled={!editable} onClick={() => props.onStartEvidence(event)}>
-                            <ImagePlus size={16} />
-                          </button>
-                          <button disabled={!editable} onClick={() => props.onRemoveEvent(event)}>
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                        {evidenceEntries.length > 0 && (
-                          <div className="evidence-strip">
-                            {evidenceEntries.map(({ image, index }) => (
-                              <button className="evidence-thumb" key={image.id} onClick={() => props.onOpenEvidence(event, index, date)}>
-                                <img src={image.dataUrl} alt={image.name} />
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
-                  {events.length === 0 && <p className="empty">这天没有日程</p>}
-                </div>
-                {ratings.map((rating) => (
-                  <article className="rating-card" key={rating.id}>
-                    <span className={`rank-badge rank-${rating.rank}`}>{rating.rank}</span>
-                    <div>
-                      <strong>好友评分 · {rating.date}</strong>
-                      <p>{rating.comment}</p>
+                        </article>
+                      ))}
                     </div>
-                  </article>
-                ))}
+                  )}
+                </div>
               </section>
             );
           })}
-          {visibleDates.length < dates.length && (
-            <button className="primary-button subtle" onClick={() => setVisibleDays((value) => value + 30)}>
-              加载更早记录
-            </button>
-          )}
+          {dates.length === 0 && <p className="empty">这个月还没有日程记录。</p>}
         </div>
       </section>
     </div>

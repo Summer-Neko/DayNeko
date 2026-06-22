@@ -5,7 +5,9 @@ import { getCurrentWebviewWindow, WebviewWindow } from "@tauri-apps/api/webviewW
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import {
   CalendarCheck,
+  CloudDownload,
   Clock3,
+  HardDrive,
   Home,
   RefreshCw,
   Settings,
@@ -20,6 +22,7 @@ import {
   dateKeyInBeijing,
   fmtTime,
   isArchiveClosed,
+  monthKey,
   nowIso,
   scheduleDateKey,
   uid,
@@ -27,10 +30,13 @@ import {
 } from "./lib/date";
 import { applyUserIdToLocalData, loadState, loadStoredState, saveState, saveStatePointer } from "./lib/state";
 import {
+  deleteEvidenceImage,
   deleteLocalRecord,
+  ensureLocalDailyInstances,
   loadFriendRatingData,
   loadHomeData,
   loadScheduleData,
+  loadScheduleMonthData,
   loadTimeDates,
   loadTimeDayData,
   loadTimeData,
@@ -94,6 +100,7 @@ import { hexToRgb } from "./lib/color";
 import { canEditEvent, eventsForDate, isDailyTemplate } from "./lib/schedule";
 import { isRecentlyOnline } from "./lib/presence";
 import { fetchGitHubReleaseNotes } from "./lib/update";
+import { installContextMenuGuard } from "./lib/contextMenu";
 import { useAppNotifications, useNotifiedStatus } from "./hooks/useAppNotifications";
 import { useTicker } from "./hooks/useTicker";
 
@@ -111,6 +118,12 @@ const emptyLocalData = (): LocalDataSnapshot => ({
   friendRatings: []
 });
 
+function deletedEvidenceIdsFromPayload(payload: unknown) {
+  if (typeof payload !== "object" || payload === null) return [];
+  const ids = (payload as { deletedEvidenceIds?: unknown }).deletedEvidenceIds;
+  return Array.isArray(ids) ? ids.map((id) => String(id)).filter(Boolean) : [];
+}
+
 type StoredEvidenceImage = {
   filePath: string;
   mimeType: string;
@@ -124,6 +137,14 @@ type DataDirStatus = {
 };
 
 type DataPathConflictChoice = "use-existing" | "overwrite" | "cancel";
+
+type CloudImportPrompt = {
+  activities: number;
+  boots: number;
+  dailyTemplates: number;
+  events: number;
+  friendRatings: number;
+};
 
 async function serializeDirtyRecordForSync(record: DirtyRecord): Promise<DirtyRecord> {
   if (record.kind !== "event" || typeof record.payload !== "object" || record.payload === null) return record;
@@ -143,6 +164,25 @@ function isEmptyFriendRatingChange(record: DirtyRecord): boolean {
   if (record.kind !== "friend-rating" || typeof record.payload !== "object" || record.payload === null) return false;
   const rating = record.payload as Partial<FriendRating> & { deleted?: boolean };
   return !rating.deleted && (!Array.isArray(rating.eventIds) || rating.eventIds.length === 0);
+}
+
+function mergeDirtyRecord(previous: DirtyRecord | undefined, next: DirtyRecord) {
+  if (!previous || previous.kind !== "event" || next.kind !== "event") return next;
+  if (typeof previous.payload !== "object" || previous.payload === null || typeof next.payload !== "object" || next.payload === null) {
+    return next;
+  }
+  const deletedEvidenceIds = Array.from(new Set([
+    ...deletedEvidenceIdsFromPayload(previous.payload),
+    ...deletedEvidenceIdsFromPayload(next.payload)
+  ]));
+  if (deletedEvidenceIds.length === 0) return next;
+  return {
+    ...next,
+    payload: {
+      ...(next.payload as Record<string, unknown>),
+      deletedEvidenceIds
+    }
+  };
 }
 
 function duplicateEventConflict(error: unknown) {
@@ -177,6 +217,8 @@ function App() {
   const [leaderboardEntries, setLeaderboardEntries] = React.useState<LeaderboardEntry[]>([]);
   const [leaderboardScope, setLeaderboardScope] = React.useState<LeaderboardScope>("7d");
   const [timeDates, setTimeDates] = React.useState<string[]>([]);
+  const [scheduleMonth, setScheduleMonth] = React.useState(() => monthKey());
+  const [dailyInstancesReadyKey, setDailyInstancesReadyKey] = React.useState("");
   const [syncStatus, setSyncStatus] = React.useState("等待自动同步");
   const [serverStatus, setServerStatus] = useNotifiedStatus("尚未测试", "服务器", notifications.notify);
   const [loginStatus, setLoginStatus] = useNotifiedStatus("未登录服务器", "登录", notifications.notify);
@@ -190,10 +232,13 @@ function App() {
   const [updateBusy, setUpdateBusy] = React.useState(false);
   const [dataPathConflict, setDataPathConflict] = React.useState<{ path: string } | null>(null);
   const dataPathConflictResolver = React.useRef<((choice: DataPathConflictChoice) => void) | null>(null);
+  const [cloudImportPrompt, setCloudImportPrompt] = React.useState<CloudImportPrompt | null>(null);
+  const cloudImportResolver = React.useRef<((importCloudData: boolean) => void) | null>(null);
   const runSyncRef = React.useRef<() => Promise<void>>(async () => undefined);
   const now = useTicker();
 
   const today = scheduleDateKey();
+  const dailyInstancesKey = `${state.settings.dataPath}\n${state.user.id}\n${today}`;
   React.useEffect(() => {
     stateRef.current = state;
   }, [state]);
@@ -242,6 +287,11 @@ function App() {
     });
   }, []);
 
+  const changeScheduleMonth = React.useCallback((month: string) => {
+    const currentMonth = monthKey(scheduleDateKey());
+    setScheduleMonth(month > currentMonth ? currentMonth : month);
+  }, []);
+
   const requestDataPathConflictChoice = React.useCallback((path: string) => (
     new Promise<DataPathConflictChoice>((resolve) => {
       dataPathConflictResolver.current = resolve;
@@ -253,6 +303,19 @@ function App() {
     dataPathConflictResolver.current?.(choice);
     dataPathConflictResolver.current = null;
     setDataPathConflict(null);
+  }, []);
+
+  const requestCloudImportChoice = React.useCallback((summary: CloudImportPrompt) => (
+    new Promise<boolean>((resolve) => {
+      cloudImportResolver.current = resolve;
+      setCloudImportPrompt(summary);
+    })
+  ), []);
+
+  const resolveCloudImportChoice = React.useCallback((importCloudData: boolean) => {
+    cloudImportResolver.current?.(importCloudData);
+    cloudImportResolver.current = null;
+    setCloudImportPrompt(null);
   }, []);
 
   React.useEffect(() => {
@@ -298,7 +361,7 @@ function App() {
   }, [state.settings.dataPath]);
 
   React.useEffect(() => {
-    if (page !== "home") return;
+    if (page !== "home" || dailyInstancesReadyKey !== dailyInstancesKey) return;
     void Promise.all([
       loadHomeData(state.settings.dataPath, today, state.user.id),
       loadFriendRatingData(state.settings.dataPath, state.user.id, 200)
@@ -309,21 +372,14 @@ function App() {
         mergeLocalData({ ...homeData, friendRatings: Array.from(byId.values()) });
       })
       .catch(() => undefined);
-  }, [mergeLocalData, page, state.settings.dataPath, state.user.id, today]);
+  }, [dailyInstancesKey, dailyInstancesReadyKey, mergeLocalData, page, state.settings.dataPath, state.user.id, today]);
 
   React.useEffect(() => {
-    if (page !== "events") return;
-    void loadScheduleData(state.settings.dataPath, state.user.id)
-      .then(async (scheduleData) => {
-        if (!state.cloudSession) return scheduleData;
-        const snapshot = await fetchUserSnapshot(state.settings, state.user.id).catch(() => null);
-        const friendRatings = snapshot?.friendRatings ?? scheduleData.friendRatings;
-        friendRatings.forEach((rating) => void saveLocalRecord(state.settings.dataPath, "friend-rating", rating, state.user.id));
-        return { ...scheduleData, friendRatings };
-      })
+    if (page !== "events" || dailyInstancesReadyKey !== dailyInstancesKey) return;
+    void loadScheduleMonthData(state.settings.dataPath, state.user.id, scheduleMonth)
       .then(mergeLocalData)
       .catch(() => undefined);
-  }, [mergeLocalData, page, state.cloudSession, state.settings, state.user.id]);
+  }, [dailyInstancesKey, dailyInstancesReadyKey, mergeLocalData, page, scheduleMonth, state.settings.dataPath, state.user.id]);
 
   React.useEffect(() => {
     if (page !== "time") return;
@@ -407,7 +463,9 @@ function App() {
     setState((prev) => {
       const next = recipe(prev);
       const deduped = new Map<string, DirtyRecord>();
-      [...prev.dirtyQueue, ...(dirty ?? [])].forEach((record) => deduped.set(record.id, record));
+      [...prev.dirtyQueue, ...(dirty ?? [])].forEach((record) => {
+        deduped.set(record.id, mergeDirtyRecord(deduped.get(record.id), record));
+      });
       const finalState = { ...next, dirtyQueue: Array.from(deduped.values()) };
       saveState(finalState);
       return finalState;
@@ -418,49 +476,21 @@ function App() {
     patchState((prev) => prev, dirty);
   };
 
-  const createDailyInstancesForToday = React.useCallback((events: CustomEvent[], dailyTemplates: CustomEvent[]) => {
-    const templates = dailyTemplates.filter((event) => event.date <= today);
-    if (templates.length === 0) return { events, created: [] as CustomEvent[] };
-    const existingKeys = new Set(events.filter((event) => !isDailyTemplate(event)).map((event) =>
-      event.templateId ? `template:${event.templateId}:${event.date}` : `title:${event.title.trim().toLowerCase()}:${event.date}`
-    ));
-    const created: CustomEvent[] = [];
-    const createInstance = (template: CustomEvent, date: string, completed: boolean) => {
-      const titleKey = `title:${template.title.trim().toLowerCase()}:${date}`;
-      const templateKey = `template:${template.id}:${date}`;
-      if (existingKeys.has(templateKey) || existingKeys.has(titleKey)) return;
-      const timestamp = nowIso();
-      const event: CustomEvent = {
-        id: `${template.id}:${date}`,
-        userId: stateRef.current.user.id,
-        title: template.title,
-        description: template.description,
-        date,
-        repeatDaily: false,
-        templateId: template.id,
-        completedDates: completed ? [date] : [],
-        evidence: completed ? template.evidence.filter((image) => !image.date || image.date === date) : [],
-        createdAt: completed ? template.createdAt : timestamp,
-        updatedAt: completed ? template.updatedAt : timestamp
-      };
-      existingKeys.add(templateKey);
-      existingKeys.add(titleKey);
-      created.push(event);
-    };
-    templates.forEach((template) => {
-      template.completedDates.forEach((date) => createInstance(template, date, true));
-      createInstance(template, today, false);
-    });
-    return { events: created.length ? [...created, ...events] : events, created };
-  }, [today]);
-
   React.useEffect(() => {
-    const result = createDailyInstancesForToday(localData.events, localData.dailyTemplates);
-    if (result.created.length === 0) return;
-    setLocalData((prev) => ({ ...prev, events: result.events }));
-    result.created.forEach((event) => void saveLocalRecord(stateRef.current.settings.dataPath, "event", event, stateRef.current.user.id));
-    enqueueDirty(result.created.map((event) => markDirty("event", event.id, event)));
-  }, [createDailyInstancesForToday, localData.dailyTemplates, localData.events]);
+    let disposed = false;
+    void ensureLocalDailyInstances(state.settings.dataPath, state.user.id, today)
+      .then((created) => {
+        if (disposed || created.length === 0) return;
+        enqueueDirty(created.map((event) => markDirty("event", event.id, event)));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!disposed) setDailyInstancesReadyKey(dailyInstancesKey);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [dailyInstancesKey, state.settings.dataPath, state.user.id, today]);
 
   const refreshFriends = React.useCallback(async () => {
     if (!state.cloudSession) {
@@ -516,7 +546,7 @@ function App() {
       saveState(next);
       return next;
     });
-    setServerStatus(`已获取最新服务器：${serverUrl}`);
+    setServerStatus("已更新服务器配置");
     return { ...state.settings, serverUrl: normalizeServerUrl(serverUrl) };
   }, [state.settings]);
 
@@ -634,6 +664,8 @@ function App() {
   React.useEffect(() => {
     runSyncRef.current = runSync;
   }, [runSync]);
+
+  React.useEffect(() => installContextMenuGuard(), []);
 
   React.useEffect(() => {
     document.documentElement.dataset.theme = state.settings.theme;
@@ -970,11 +1002,31 @@ function App() {
       date: today,
       createdAt: nowIso()
     };
-    const nextEvent = { ...event, evidence: [evidence, ...event.evidence].slice(0, 4), updatedAt: nowIso() };
+    const nextEvidence = [evidence, ...event.evidence].slice(0, 4);
+    const droppedEvidence = event.evidence.filter((image) => !nextEvidence.some((nextImage) => nextImage.id === image.id));
+    droppedEvidence.forEach((image) => void deleteEvidenceImage(state.settings.dataPath, image.filePath));
+    const nextEvent = { ...event, evidence: nextEvidence, updatedAt: nowIso() };
     setLocalData((prev) => ({ ...prev, events: prev.events.map((item) => (item.id === event.id ? nextEvent : item)) }));
     void saveLocalRecord(state.settings.dataPath, "event", nextEvent, state.user.id);
-    enqueueDirty([markDirty("event", nextEvent.id, nextEvent)]);
+    enqueueDirty([markDirty("event", nextEvent.id, {
+      ...nextEvent,
+      deletedEvidenceIds: droppedEvidence.map((image) => image.id)
+    })]);
     setEvidenceDraft(null);
+  };
+
+  const removeEvidence = (event: CustomEvent, imageId: string) => {
+    if (!canEditEvent(event, today)) return;
+    const image = event.evidence.find((item) => item.id === imageId);
+    const nextEvent = {
+      ...event,
+      evidence: event.evidence.filter((item) => item.id !== imageId),
+      updatedAt: nowIso()
+    };
+    setLocalData((prev) => ({ ...prev, events: prev.events.map((item) => (item.id === event.id ? nextEvent : item)) }));
+    void deleteEvidenceImage(state.settings.dataPath, image?.filePath);
+    void saveLocalRecord(state.settings.dataPath, "event", nextEvent, state.user.id);
+    enqueueDirty([markDirty("event", nextEvent.id, { ...nextEvent, deletedEvidenceIds: [imageId] })]);
   };
 
   const removeEvent = (event: CustomEvent) => {
@@ -984,6 +1036,7 @@ function App() {
       ...prev,
       events: prev.events.filter((item) => item.id !== event.id)
     }));
+    event.evidence.forEach((image) => void deleteEvidenceImage(state.settings.dataPath, image.filePath));
     void deleteLocalRecord(state.settings.dataPath, "event", event.id);
     enqueueDirty([markDirty("event", event.id, deletedEvent)]);
   };
@@ -1003,16 +1056,45 @@ function App() {
   const loginToServer = async () => {
     if (loginBusy) return;
     setLoginBusy(true);
-    const applyLoginResult = (result: Awaited<ReturnType<typeof authDevice>>, serverUrl: string) => {
+    const applyLoginResult = async (result: Awaited<ReturnType<typeof authDevice>>, serverUrl: string) => {
+      const nextSettings = { ...state.settings, serverUrl: normalizeServerUrl(serverUrl) };
+      const cloudSnapshot = await fetchUserSnapshot(nextSettings, result.user.id).catch(() => null);
+      const cloudActivities = cloudSnapshot?.activities ?? [];
+      const cloudBoots = cloudSnapshot?.boots ?? [];
+      const cloudEvents = cloudSnapshot?.events ?? [];
+      const cloudDailyTemplates = cloudSnapshot?.dailyTemplates ?? [];
+      const cloudFriendRatings = cloudSnapshot?.friendRatings ?? [];
+      const currentBoot = currentBootRef.current ? { ...currentBootRef.current, userId: result.user.id } : null;
+      const hasCloudData = cloudActivities.length > 0 || cloudBoots.length > 0 || cloudEvents.length > 0 || cloudDailyTemplates.length > 0 || cloudFriendRatings.length > 0;
+      const importCloudData = hasCloudData && await requestCloudImportChoice({
+        activities: cloudActivities.length,
+        boots: cloudBoots.length,
+        dailyTemplates: cloudDailyTemplates.length,
+        events: cloudEvents.length,
+        friendRatings: cloudFriendRatings.length
+      });
+      const importedBoots = currentBoot
+        ? [currentBoot, ...cloudBoots.filter((boot) => boot.id !== currentBoot.id)]
+        : cloudBoots;
+      if (currentBoot) currentBootRef.current = currentBoot;
       const adoptedLocal: LocalDataSnapshot = {
-        boots: localData.boots.map((item) => ({ ...item, userId: result.user.id })),
-        activities: localData.activities.map((item) => ({ ...item, userId: result.user.id })),
-        events: localData.events.map((item) => ({ ...item, userId: result.user.id })),
-        dailyTemplates: localData.dailyTemplates.map((item) => ({ ...item, userId: result.user.id })),
-        friendRatings: localData.friendRatings.map((item) => (
+        boots: importCloudData ? importedBoots : localData.boots.map((item) => ({ ...item, userId: result.user.id })),
+        activities: importCloudData ? cloudActivities : localData.activities.map((item) => ({ ...item, userId: result.user.id })),
+        events: importCloudData ? cloudEvents : localData.events.map((item) => ({ ...item, userId: result.user.id })),
+        dailyTemplates: importCloudData ? cloudDailyTemplates : localData.dailyTemplates.map((item) => ({ ...item, userId: result.user.id })),
+        friendRatings: importCloudData ? cloudFriendRatings : localData.friendRatings.map((item) => (
           item.raterFriendId === state.user.id ? { ...item, raterFriendId: result.user.id } : item
         ))
       };
+      if (importCloudData) {
+        localData.boots.forEach((item) => {
+          if (item.id !== currentBoot?.id) void deleteLocalRecord(state.settings.dataPath, "boot", item.id);
+        });
+        localData.activities.forEach((item) => void deleteLocalRecord(state.settings.dataPath, "activity", item.id));
+        localData.events.forEach((item) => void deleteLocalRecord(state.settings.dataPath, "event", item.id));
+        localData.dailyTemplates.forEach((item) => void deleteLocalRecord(state.settings.dataPath, "daily-template", item.id));
+        localData.friendRatings.forEach((item) => void deleteLocalRecord(state.settings.dataPath, "friend-rating", item.id));
+      }
       setLocalData(adoptedLocal);
       [
         ...adoptedLocal.boots.map((item) => ({ kind: "boot" as const, item })),
@@ -1025,15 +1107,15 @@ function App() {
         const adopted = applyUserIdToLocalData(prev, result.user.id);
         const dirtyRecords = [
           markDirty("user", result.user.id, result.user),
-          ...adoptedLocal.boots.map((item) => markDirty("boot", item.id, item)),
-          ...adoptedLocal.activities.map((item) => markDirty("activity", item.id, item)),
-          ...adoptedLocal.events.map((item) => markDirty("event", item.id, item)),
-          ...adoptedLocal.dailyTemplates.map((item) => markDirty("daily-template", item.id, item)),
-          ...adoptedLocal.friendRatings.map((item) => markDirty("friend-rating", item.id, item))
+          ...(importCloudData && currentBoot ? [markDirty("boot", currentBoot.id, currentBoot)] : adoptedLocal.boots.map((item) => markDirty("boot", item.id, item))),
+          ...(importCloudData ? [] : adoptedLocal.activities.map((item) => markDirty("activity", item.id, item))),
+          ...(importCloudData ? [] : adoptedLocal.events.map((item) => markDirty("event", item.id, item))),
+          ...(importCloudData ? [] : adoptedLocal.dailyTemplates.map((item) => markDirty("daily-template", item.id, item))),
+          ...(importCloudData ? [] : adoptedLocal.friendRatings.map((item) => markDirty("friend-rating", item.id, item)))
         ];
         const next = {
           ...adopted,
-          settings: { ...adopted.settings, serverUrl: normalizeServerUrl(serverUrl) },
+          settings: { ...adopted.settings, serverUrl: nextSettings.serverUrl },
           user: result.user,
           cloudSession: {
             machineKey: result.machineKey,
@@ -1049,7 +1131,7 @@ function App() {
     setServerStatus("登录中...");
     try {
       const result = await authDevice(state.settings, state.user);
-      applyLoginResult(result, state.settings.serverUrl);
+      await applyLoginResult(result, state.settings.serverUrl);
       setLoginStatus(result.status === "created" ? "已创建并登录本设备账号" : "已登录本设备账号");
       setServerStatus("已登录服务器");
       void refreshFriends();
@@ -1059,7 +1141,7 @@ function App() {
         const discovered = await discoverServer();
         if (!discovered) throw new Error("server discovery disabled");
         const result = await authDevice(discovered, state.user);
-        applyLoginResult(result, discovered.serverUrl);
+        await applyLoginResult(result, discovered.serverUrl);
         setLoginStatus(result.status === "created" ? "已通过最新服务器创建并登录" : "已通过最新服务器登录");
         setServerStatus("已切换到最新服务器");
         void refreshFriends();
@@ -1228,13 +1310,12 @@ function App() {
           .then((response) => (response.ok ? response.json() : null))
           .catch(() => null)
         : null;
-      if (state.cloudSession && (snapshot?.events?.length || snapshot?.friendRatings?.length)) {
+      if (state.cloudSession && snapshot?.friendRatings?.length) {
         setLocalData((prev) => {
-          const events = snapshot.events?.length ? snapshot.events as CustomEvent[] : prev.events;
           const friendRatings = snapshot.friendRatings?.length ? snapshot.friendRatings as FriendRating[] : prev.friendRatings;
-          [...events.map((item) => ({ kind: "event" as const, item })), ...friendRatings.map((item) => ({ kind: "friend-rating" as const, item }))]
+          friendRatings.map((item) => ({ kind: "friend-rating" as const, item }))
             .forEach(({ kind, item }) => void saveLocalRecord(state.settings.dataPath, kind, item, state.user.id));
-          return { ...prev, events, friendRatings };
+          return { ...prev, friendRatings };
         });
       }
       setServerStatus(result.status === "ok" ? "连接正常" : "服务器有响应");
@@ -1391,10 +1472,14 @@ function App() {
             events={visibleEvents}
             allEvents={localData.events}
             dailyTemplates={localData.dailyTemplates}
+            friends={state.friends}
             ratings={receivedRatings}
+            month={scheduleMonth}
             today={today}
             onAddEvent={addEvent}
             onEvidence={uploadEvidence}
+            onMonthChange={changeScheduleMonth}
+            onRemoveEvidence={removeEvidence}
             onStartEvidence={(event) => setEvidenceDraft({ eventId: event.id, name: "pasted-image.jpg" })}
             onOpenEvidence={(event, index, date) => setEvidenceSelection({ eventId: event.id, index, date })}
             onRemoveDailyTemplate={removeDailyTemplate}
@@ -1517,6 +1602,40 @@ function App() {
           setAvatarCrop(null);
         }}
       />
+      {cloudImportPrompt && (
+        <div className="cloud-import-dialog" role="dialog" aria-modal="true" aria-labelledby="cloud-import-title">
+          <div className="cloud-import-backdrop" />
+          <section className="cloud-import-panel">
+            <header>
+              <div>
+                <span className="section-kicker">Cloud Data</span>
+                <h2 id="cloud-import-title">检测到云端已有数据</h2>
+                <p>选择这台设备首次登录后的数据来源。</p>
+              </div>
+            </header>
+            <div className="cloud-import-body">
+              <dl className="cloud-import-counts">
+                <div><dt>日程</dt><dd>{cloudImportPrompt.events}</dd></div>
+                <div><dt>每日循环</dt><dd>{cloudImportPrompt.dailyTemplates}</dd></div>
+                <div><dt>好友评分</dt><dd>{cloudImportPrompt.friendRatings}</dd></div>
+                <div><dt>时间活动</dt><dd>{cloudImportPrompt.activities}</dd></div>
+                <div><dt>启动记录</dt><dd>{cloudImportPrompt.boots}</dd></div>
+              </dl>
+              <p>使用云端数据会覆盖本地日程和时间地图；保留本地数据则会把本机内容作为权威来源同步到云端。</p>
+            </div>
+            <footer>
+              <button className="primary-button accent-soft" type="button" autoFocus onClick={() => resolveCloudImportChoice(false)}>
+                <HardDrive size={17} />
+                保留本地数据
+              </button>
+              <button className="primary-button" type="button" onClick={() => resolveCloudImportChoice(true)}>
+                <CloudDownload size={17} />
+                使用云端数据
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
       {dataPathConflict && (
         <div className="data-path-dialog" role="dialog" aria-modal="true">
           <button className="data-path-dialog-backdrop" onClick={() => resolveDataPathConflictChoice("cancel")} />

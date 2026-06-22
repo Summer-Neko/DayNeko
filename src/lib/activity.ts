@@ -30,7 +30,7 @@ export function classifyForegroundActivity(activity: ForegroundActivity): AutoAc
   if (haystack.includes("starrail") || title.includes("星穹铁道")) {
     return { key: "game:star-rail", label: "星穹铁道", mood: "游戏中" };
   }
-  if (haystack.includes("end field") || title.includes("终末地")) {
+  if (haystack.includes("endfield") || title.includes("终末地")) {
     return { key: "game:end-field", label: "终末地", mood: "游戏中" };
   }
   if (haystack.includes("zenlesszonezero") || title.includes("绝区零")) {

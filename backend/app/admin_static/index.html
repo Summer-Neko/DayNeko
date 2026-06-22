@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DayNeko Admin</title>
-    <link rel="stylesheet" href="/admin/assets/styles.css" />
+    <link rel="stylesheet" href="/admin/assets/styles.css?v=20260619-inline-records" />
   </head>
   <body>
     <main class="shell">
@@ -93,6 +93,7 @@
                   <option value="boot">boot</option>
                   <option value="activity">activity</option>
                   <option value="event">event</option>
+                  <option value="daily-template">daily-template</option>
                   <option value="friend-rating">friend-rating</option>
                   <option value="presence">presence</option>
                 </select>
@@ -129,6 +130,24 @@
       </section>
     </main>
 
-    <script src="/admin/assets/app.js" type="module"></script>
+    <section class="modal" id="modal" aria-hidden="true">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <header>
+          <div>
+            <span>JSON EDITOR</span>
+            <h2 id="modalTitle">编辑记录</h2>
+            <small id="modalHint"></small>
+          </div>
+          <button class="ghost-icon" id="modalClose" type="button">关闭</button>
+        </header>
+        <textarea id="modalTextarea" spellcheck="false"></textarea>
+        <footer>
+          <button class="soft" id="modalCancel" type="button">取消</button>
+          <button id="modalSave" type="button">保存</button>
+        </footer>
+      </div>
+    </section>
+
+    <script src="/admin/assets/app.js?v=20260619-inline-records" type="module"></script>
   </body>
 </html>

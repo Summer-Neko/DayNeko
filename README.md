@@ -2,6 +2,8 @@
 
 DayNeko 是一个本地优先的日常记录桌面应用。它把「今天做了什么」「应用什么时候运行」「有哪些自定义日程」「好友当天完成情况与评分」放在一个轻量桌面端里，并提供 FastAPI + SQLite 后端用于好友、同步、排行榜和后台管理。
 
+## 页面展示
+
 ## 当前能力
 
 - Tauri 2 + React 19 + Vite 桌面端。
@@ -101,27 +103,21 @@ http://127.0.0.1:8787/admin
 npm.cmd run tauri -- dev
 ```
 
-如果当前 PowerShell 找不到 `cargo`，先把 Rust 加到本次终端的 PATH：
-
-```powershell
-$env:PATH = "C:\Users\Sunme\.cargo\bin;$env:PATH"
-```
-
 ## 打包
 
 普通构建：
 
 ```powershell
-npm.cmd run build
+npm run build
 ```
 
 Tauri 打包：
 
 ```powershell
-npm.cmd run tauri -- build
+npm run tauri -- build
 ```
 
-构建产物通常在：
+打包后的产物在：
 
 ```text
 src-tauri\target\release\
@@ -191,41 +187,16 @@ POST /sync/changes
 src-tauri/icons/icon.ico
 ```
 
-更换图标后需要重新 Tauri 打包。Windows 可能缓存旧的 exe、快捷方式或任务栏图标，必要时取消固定再重新固定，或者等待系统图标缓存刷新。
-
-自绘标题栏里的图标也引用同一个 `icon.ico`，所以重新构建前端后标题栏图标会同步变化。
-
-## 国际化建议
+## 国际化方向
 
 当前中文文案主要直接写在组件里，还没有统一 i18n 层。并不是不能改，只是一次性替换会比较机械。
 
-推荐后续逐步做：
+后续：
 
 1. 新建 `src/lib/i18n.ts`，定义 `messages` 字典。
 2. 先替换导航、设置页和高频按钮。
 3. 再逐步替换各页面标题、空状态、通知和错误提示。
 4. 最后处理后端返回错误、更新窗口和后台管理页。
-
-最小示例：
-
-```ts
-import type { Language } from "../types";
-
-export const messages = {
-  "zh-CN": {
-    settings: "设置",
-    restoreAppearance: "恢复默认外观设置"
-  },
-  "en-US": {
-    settings: "Settings",
-    restoreAppearance: "Reset appearance"
-  }
-} satisfies Record<Language, Record<string, string>>;
-
-export function t(language: Language, key: keyof typeof messages["zh-CN"]) {
-  return messages[language]?.[key] ?? messages["zh-CN"][key] ?? key;
-}
-```
 
 ## 常用命令
 
@@ -239,7 +210,6 @@ uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8787
 ## 仍需继续完善
 
 - 建立统一 i18n 字典，避免中文文案继续散落。
-- 进一步清理 `main.tsx` 中仍然偏集中的业务逻辑。
 - 为后台管理增加更细的权限和审计日志。
 - 为同步冲突处理增加更明确的策略。
 - 为核心流程补充自动化测试。

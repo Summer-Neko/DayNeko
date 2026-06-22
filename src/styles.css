@@ -1203,11 +1203,92 @@ textarea {
   margin-top: 18px;
 }
 
+.schedule-log-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.schedule-month-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.schedule-month-control > strong {
+  min-width: 112px;
+  text-align: center;
+  font-size: 1.05rem;
+}
+
+.schedule-month-control button {
+  display: inline-flex;
+  min-width: 38px;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  border-radius: 8px;
+  color: var(--ink);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.schedule-month-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.schedule-month-control .schedule-month-today {
+  padding: 0 14px;
+  color: var(--accent-ink);
+  background: rgba(var(--accent-rgb), 0.22);
+  font-weight: 900;
+}
+
+.schedule-month-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.schedule-month-summary span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.32);
+  font-weight: 800;
+}
+
+:root[data-theme="dark"] .schedule-month-summary span {
+  border-color: rgba(var(--accent-rgb), 0.2);
+  color: rgba(238, 244, 236, 0.72);
+  background: rgba(12, 18, 14, 0.42);
+}
+
+:root[data-theme="dark"] .schedule-month-control button {
+  border-color: rgba(var(--accent-rgb), 0.22);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
+:root[data-theme="dark"] .schedule-month-control button:disabled {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(12, 18, 14, 0.32);
+}
+
 .schedule-day {
   position: relative;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
+  max-height: min(620px, 72vh);
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1237,6 +1318,43 @@ textarea {
 
 .schedule-day-head span {
   color: var(--muted);
+}
+
+.schedule-day-scroll {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.schedule-rating-list {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-rating-card {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  min-height: 88px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.schedule-rating-card strong,
+.schedule-rating-card p {
+  display: block;
+  min-width: 0;
+}
+
+.schedule-rating-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .done-control {
@@ -2097,6 +2215,7 @@ textarea {
 }
 
 .evidence-thumb {
+  position: relative;
   width: 84px;
   height: 64px;
   flex: 0 0 auto;
@@ -2107,10 +2226,37 @@ textarea {
   background: transparent;
 }
 
+.evidence-preview {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .evidence-thumb img {
   width: 84px;
   height: 64px;
   object-fit: cover;
+}
+
+.evidence-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(28, 31, 35, 0.74);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+}
+
+.evidence-remove:hover {
+  background: #e5484d;
 }
 
 .field {
@@ -2305,6 +2451,136 @@ textarea {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.cloud-import-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.cloud-import-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 12, 10, 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.cloud-import-panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(680px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.34);
+  animation: notification-enter 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.cloud-import-panel header,
+.cloud-import-panel footer {
+  padding: 20px 22px;
+}
+
+.cloud-import-panel header {
+  border-bottom: 1px solid var(--line);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.cloud-import-panel h2 {
+  margin: 6px 0;
+  font-size: calc(24px * var(--font-scale));
+}
+
+.cloud-import-panel header p,
+.cloud-import-body > p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.cloud-import-body {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.cloud-import-counts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  border-block: 1px solid var(--line);
+}
+
+.cloud-import-counts > div {
+  min-width: 0;
+  padding: 14px 10px;
+  border-right: 1px solid var(--line);
+  text-align: center;
+}
+
+.cloud-import-counts > div:last-child {
+  border-right: 0;
+}
+
+.cloud-import-counts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cloud-import-counts dd {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-size: calc(24px * var(--font-scale));
+  font-weight: 850;
+}
+
+.cloud-import-panel footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 640px) {
+  .cloud-import-dialog {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .cloud-import-panel {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+  }
+
+  .cloud-import-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cloud-import-counts > div {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .cloud-import-counts > div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .cloud-import-counts > div:last-child {
+    grid-column: 1 / -1;
+    border-bottom: 0;
+  }
+
+  .cloud-import-panel footer > button {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
 }
 
 .data-path-dialog {
@@ -3406,6 +3682,10 @@ textarea {
 @media (max-width: 620px) {
   .main-stage {
     padding: 18px;
+  }
+
+  .schedule-day {
+    max-height: min(520px, 76vh);
   }
 
   .metric-row,

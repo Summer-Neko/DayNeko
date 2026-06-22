@@ -55,12 +55,14 @@ fn legacy_exe_data_dir() -> Option<PathBuf> {
 fn default_data_dir() -> Result<PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
-        return legacy_exe_data_dir().ok_or_else(|| "cannot resolve application data directory".to_string());
+        return legacy_exe_data_dir()
+            .ok_or_else(|| "cannot resolve application data directory".to_string());
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        return legacy_exe_data_dir().ok_or_else(|| "cannot resolve application data directory".to_string());
+        return legacy_exe_data_dir()
+            .ok_or_else(|| "cannot resolve application data directory".to_string());
     }
 }
 
@@ -77,8 +79,12 @@ fn previous_appdata_data_dir() -> Option<PathBuf> {
         std::env::var_os("XDG_DATA_HOME")
             .map(|base| PathBuf::from(base).join("dayneko"))
             .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(|home| PathBuf::from(home).join(".local").join("share").join("dayneko"))
+                std::env::var_os("HOME").map(|home| {
+                    PathBuf::from(home)
+                        .join(".local")
+                        .join("share")
+                        .join("dayneko")
+                })
             })
     }
 }
@@ -273,7 +279,10 @@ fn json_text(value: &Value) -> Result<String, String> {
 }
 
 fn json_id(value: &Value) -> Option<&str> {
-    value.get("id").and_then(Value::as_str).filter(|id| !id.trim().is_empty())
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
 }
 
 fn json_user_id(value: &Value, fallback: &str) -> String {
@@ -318,9 +327,7 @@ fn insert_payload_table(
     let id = json_id(payload).ok_or_else(|| format!("{table} payload missing id"))?;
     let user_id = json_user_id(payload, owner_user_id);
     let updated_at = json_updated_at(payload);
-    let sql = format!(
-        "insert into {table} (id, user_id, payload, updated_at) values (?, ?, ?, ?)"
-    );
+    let sql = format!("insert into {table} (id, user_id, payload, updated_at) values (?, ?, ?, ?)");
     tx.execute(&sql, params![id, user_id, json_text(payload)?, updated_at])
         .map_err(|err| err.to_string())?;
     Ok(())
@@ -351,7 +358,10 @@ fn save_state_tables(conn: &mut Connection, state: &Value) -> Result<(), String>
         .get("user")
         .cloned()
         .unwrap_or_else(|| json!({ "id": "local-neko", "name": "Sunme", "handle": "@dayneko" }));
-    let owner_user_id = user.get("id").and_then(Value::as_str).unwrap_or("local-neko");
+    let owner_user_id = user
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("local-neko");
     let tx = conn.transaction().map_err(|err| err.to_string())?;
 
     upsert_meta(&tx, "user", &user)?;
@@ -393,9 +403,21 @@ fn save_state_tables(conn: &mut Connection, state: &Value) -> Result<(), String>
     insert_payload_array(&tx, state, "boots", "boots", owner_user_id)?;
     insert_payload_array(&tx, state, "activities", "activities", owner_user_id)?;
     insert_payload_array(&tx, state, "events", "events", owner_user_id)?;
-    insert_payload_array(&tx, state, "dailyTemplates", "daily_templates", owner_user_id)?;
+    insert_payload_array(
+        &tx,
+        state,
+        "dailyTemplates",
+        "daily_templates",
+        owner_user_id,
+    )?;
     insert_payload_array(&tx, state, "friends", "friends", owner_user_id)?;
-    insert_payload_array(&tx, state, "friendRequests", "friend_requests", owner_user_id)?;
+    insert_payload_array(
+        &tx,
+        state,
+        "friendRequests",
+        "friend_requests",
+        owner_user_id,
+    )?;
     insert_payload_array(&tx, state, "friendRatings", "friend_ratings", owner_user_id)?;
 
     tx.commit().map_err(|err| err.to_string())?;
@@ -415,7 +437,12 @@ fn table_for_record_kind(kind: &str) -> Result<&'static str, String> {
     }
 }
 
-fn upsert_local_record(conn: &mut Connection, kind: &str, owner_user_id: &str, payload: &Value) -> Result<(), String> {
+fn upsert_local_record(
+    conn: &mut Connection,
+    kind: &str,
+    owner_user_id: &str,
+    payload: &Value,
+) -> Result<(), String> {
     let table = table_for_record_kind(kind)?;
     let id = json_id(payload).ok_or_else(|| format!("{kind} payload missing id"))?;
     let user_id = json_user_id(payload, owner_user_id);
@@ -441,7 +468,11 @@ fn upsert_local_record(conn: &mut Connection, kind: &str, owner_user_id: &str, p
 
 fn load_meta(conn: &Connection, key: &str) -> Result<Option<Value>, String> {
     let raw = conn
-        .query_row("select value from app_meta where key = ?", params![key], |row| row.get::<_, String>(0))
+        .query_row(
+            "select value from app_meta where key = ?",
+            params![key],
+            |row| row.get::<_, String>(0),
+        )
         .optional()
         .map_err(|err| err.to_string())?;
     raw.map(|value| serde_json::from_str(&value).map_err(|err| err.to_string()))
@@ -477,7 +508,11 @@ fn migrate_daily_templates_once(conn: &mut Connection) -> Result<(), String> {
         [],
     )
     .map_err(|err| err.to_string())?;
-    upsert_meta(&tx, "migration:daily_templates_v1", &json!({ "done": true, "updatedAt": chrono_like_now() }))?;
+    upsert_meta(
+        &tx,
+        "migration:daily_templates_v1",
+        &json!({ "done": true, "updatedAt": chrono_like_now() }),
+    )?;
     tx.commit().map_err(|err| err.to_string())?;
     Ok(())
 }
@@ -498,7 +533,9 @@ fn load_payload_array(conn: &Connection, table: &str) -> Result<Value, String> {
 
 fn load_payload_array_limited(conn: &Connection, table: &str, limit: i64) -> Result<Value, String> {
     let mut stmt = conn
-        .prepare(&format!("select payload from {table} order by updated_at desc limit ?"))
+        .prepare(&format!(
+            "select payload from {table} order by updated_at desc limit ?"
+        ))
         .map_err(|err| err.to_string())?;
     let rows = stmt
         .query_map(params![limit], |row| row.get::<_, String>(0))
@@ -538,7 +575,12 @@ fn load_time_dates(conn: &Connection, limit: i64) -> Result<Value, String> {
     Ok(Value::Array(dates))
 }
 
-fn load_time_payloads_for_date(conn: &Connection, table: &str, date: &str, limit: i64) -> Result<Value, String> {
+fn load_time_payloads_for_date(
+    conn: &Connection,
+    table: &str,
+    date: &str,
+    limit: i64,
+) -> Result<Value, String> {
     let mut stmt = conn
         .prepare(&format!(
             "
@@ -552,18 +594,47 @@ fn load_time_payloads_for_date(conn: &Connection, table: &str, date: &str, limit
         ))
         .map_err(|err| err.to_string())?;
     let rows = stmt
-        .query_map(params![date, date, date, limit], |row| row.get::<_, String>(0))
+        .query_map(params![date, date, date, limit], |row| {
+            row.get::<_, String>(0)
+        })
         .map_err(|err| err.to_string())?;
     payload_rows_to_array(rows)
 }
 
-fn payload_rows_to_array(rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<String>>) -> Result<Value, String> {
+fn payload_rows_to_array(
+    rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<String>>,
+) -> Result<Value, String> {
     let mut items = Vec::new();
     for row in rows {
         let raw = row.map_err(|err| err.to_string())?;
         items.push(serde_json::from_str(&raw).map_err(|err| err.to_string())?);
     }
     Ok(Value::Array(items))
+}
+
+fn month_range(month: &str) -> Result<(String, String), String> {
+    let mut parts = month.split('-');
+    let year = parts
+        .next()
+        .and_then(|value| value.parse::<i32>().ok())
+        .ok_or_else(|| "invalid month".to_string())?;
+    let month_number = parts
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or_else(|| "invalid month".to_string())?;
+    if parts.next().is_some() || !(1..=12).contains(&month_number) {
+        return Err("invalid month".to_string());
+    }
+    let next_year = if month_number == 12 { year + 1 } else { year };
+    let next_month = if month_number == 12 {
+        1
+    } else {
+        month_number + 1
+    };
+    Ok((
+        format!("{year:04}-{month_number:02}-01"),
+        format!("{next_year:04}-{next_month:02}-01"),
+    ))
 }
 
 fn load_events_for_date(conn: &Connection, date: &str, limit: i64) -> Result<Value, String> {
@@ -583,7 +654,32 @@ fn load_events_for_date(conn: &Connection, date: &str, limit: i64) -> Result<Val
         )
         .map_err(|err| err.to_string())?;
     let rows = stmt
-        .query_map(params![date, date, date, limit], |row| row.get::<_, String>(0))
+        .query_map(params![date, date, date, limit], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|err| err.to_string())?;
+    payload_rows_to_array(rows)
+}
+
+fn load_events_for_month(conn: &Connection, month: &str) -> Result<Value, String> {
+    let (start, end) = month_range(month)?;
+    let mut stmt = conn
+        .prepare(
+            "
+            select payload from events
+            where (json_extract(payload, '$.date') >= ? and json_extract(payload, '$.date') < ?)
+               or exists (
+                    select 1 from json_each(events.payload, '$.completedDates')
+                    where value >= ? and value < ?
+               )
+            order by json_extract(payload, '$.date') desc, updated_at desc
+            ",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![start, end, start, end], |row| {
+            row.get::<_, String>(0)
+        })
         .map_err(|err| err.to_string())?;
     payload_rows_to_array(rows)
 }
@@ -600,6 +696,160 @@ fn load_daily_templates(conn: &Connection, limit: i64) -> Result<Value, String> 
         .map_err(|err| err.to_string())?;
     let rows = stmt
         .query_map(params![limit], |row| row.get::<_, String>(0))
+        .map_err(|err| err.to_string())?;
+    payload_rows_to_array(rows)
+}
+
+fn ensure_daily_instances(
+    conn: &mut Connection,
+    user_id: &str,
+    date: &str,
+) -> Result<Value, String> {
+    let templates = load_daily_templates(conn, 1000)?;
+    let now = conn
+        .query_row("select strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|err| err.to_string())?;
+    let mut existing_ids = std::collections::HashSet::new();
+    let mut existing_titles = std::collections::HashSet::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "select id, coalesce(json_extract(payload, '$.title'), '') from events where json_extract(payload, '$.date') = ?",
+            )
+            .map_err(|err| err.to_string())?;
+        let rows = stmt
+            .query_map(params![date], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|err| err.to_string())?;
+        for row in rows {
+            let (id, title) = row.map_err(|err| err.to_string())?;
+            existing_ids.insert(id);
+            existing_titles.insert(title.trim().to_lowercase());
+        }
+    }
+
+    let tx = conn.transaction().map_err(|err| err.to_string())?;
+    let mut created = Vec::new();
+    for template in templates.as_array().into_iter().flatten() {
+        let Some(template_id) = json_id(template) else {
+            continue;
+        };
+        if template
+            .get("date")
+            .and_then(Value::as_str)
+            .is_some_and(|start| start > date)
+        {
+            continue;
+        }
+        let instance_id = format!("{template_id}:{date}");
+        let title = template.get("title").and_then(Value::as_str).unwrap_or("");
+        if existing_ids.contains(&instance_id)
+            || existing_titles.contains(&title.trim().to_lowercase())
+        {
+            continue;
+        }
+
+        let completed = template
+            .get("completedDates")
+            .and_then(Value::as_array)
+            .is_some_and(|dates| dates.iter().any(|value| value.as_str() == Some(date)));
+        let mut instance = template.clone();
+        let Some(instance_object) = instance.as_object_mut() else {
+            continue;
+        };
+        instance_object.insert("id".to_string(), Value::String(instance_id.clone()));
+        instance_object.insert("userId".to_string(), Value::String(user_id.to_string()));
+        instance_object.insert("date".to_string(), Value::String(date.to_string()));
+        instance_object.insert("repeatDaily".to_string(), Value::Bool(false));
+        instance_object.insert(
+            "templateId".to_string(),
+            Value::String(template_id.to_string()),
+        );
+        instance_object.insert(
+            "completedDates".to_string(),
+            json!(if completed {
+                vec![date]
+            } else {
+                Vec::<&str>::new()
+            }),
+        );
+        instance_object.remove("isTemplate");
+        if completed {
+            let evidence = instance_object
+                .get("evidence")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter(|image| {
+                            image
+                                .get("date")
+                                .and_then(Value::as_str)
+                                .is_none_or(|image_date| image_date == date)
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            instance_object.insert("evidence".to_string(), Value::Array(evidence));
+        } else {
+            instance_object.insert("evidence".to_string(), Value::Array(Vec::new()));
+            instance_object.insert("createdAt".to_string(), Value::String(now.clone()));
+            instance_object.insert("updatedAt".to_string(), Value::String(now.clone()));
+        }
+
+        tx.execute(
+            "insert into events (id, user_id, payload, updated_at) values (?, ?, ?, ?)",
+            params![
+                instance_id,
+                user_id,
+                json_text(&instance)?,
+                json_updated_at(&instance)
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+        tx.execute(
+            "
+            insert into dirty_queue (id, kind, payload, changed_at, updated_at)
+            values (?, 'event', ?, ?, datetime('now'))
+            on conflict(id) do update set
+                kind=excluded.kind,
+                payload=excluded.payload,
+                changed_at=excluded.changed_at,
+                updated_at=excluded.updated_at
+            ",
+            params![format!("event:{instance_id}"), json_text(&instance)?, now],
+        )
+        .map_err(|err| err.to_string())?;
+        existing_titles.insert(title.trim().to_lowercase());
+        created.push(instance);
+    }
+    tx.commit().map_err(|err| err.to_string())?;
+    Ok(Value::Array(created))
+}
+
+fn load_ratings_for_target_month(
+    conn: &Connection,
+    user_id: &str,
+    month: &str,
+) -> Result<Value, String> {
+    let (start, end) = month_range(month)?;
+    let mut stmt = conn
+        .prepare(
+            "
+            select payload from friend_ratings
+            where json_extract(payload, '$.targetUserId') = ?
+              and json_extract(payload, '$.date') >= ?
+              and json_extract(payload, '$.date') < ?
+            order by json_extract(payload, '$.date') desc, updated_at desc
+            ",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![user_id, start, end], |row| row.get::<_, String>(0))
         .map_err(|err| err.to_string())?;
     payload_rows_to_array(rows)
 }
@@ -668,7 +918,9 @@ fn load_dirty_queue(conn: &Connection) -> Result<Value, String> {
 fn load_state_tables(conn: &Connection) -> Result<Option<Value>, String> {
     let has_user = load_meta(conn, "user")?.is_some();
     let has_events = conn
-        .query_row("select exists(select 1 from events limit 1)", [], |row| row.get::<_, i64>(0))
+        .query_row("select exists(select 1 from events limit 1)", [], |row| {
+            row.get::<_, i64>(0)
+        })
         .map_err(|err| err.to_string())?
         != 0;
     if !has_user && !has_events {
@@ -691,7 +943,10 @@ fn load_state_tables(conn: &Connection) -> Result<Option<Value>, String> {
 
     state.insert("dirtyQueue".to_string(), load_dirty_queue(conn)?);
     state.insert("friends".to_string(), load_payload_array(conn, "friends")?);
-    state.insert("friendRequests".to_string(), load_payload_array(conn, "friend_requests")?);
+    state.insert(
+        "friendRequests".to_string(),
+        load_payload_array(conn, "friend_requests")?,
+    );
 
     Ok(Some(Value::Object(state)))
 }
@@ -699,7 +954,9 @@ fn load_state_tables(conn: &Connection) -> Result<Option<Value>, String> {
 fn migrate_state_blob(conn: &mut Connection) -> Result<(), String> {
     let has_tables = load_meta(conn, "user")?.is_some()
         || conn
-            .query_row("select exists(select 1 from events limit 1)", [], |row| row.get::<_, i64>(0))
+            .query_row("select exists(select 1 from events limit 1)", [], |row| {
+                row.get::<_, i64>(0)
+            })
             .map_err(|err| err.to_string())?
             != 0;
     if has_tables {
@@ -707,7 +964,11 @@ fn migrate_state_blob(conn: &mut Connection) -> Result<(), String> {
     }
 
     let raw = conn
-        .query_row("select value from app_state where key = 'state'", [], |row| row.get::<_, String>(0))
+        .query_row(
+            "select value from app_state where key = 'state'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
         .optional()
         .map_err(|err| err.to_string())?;
     let Some(raw) = raw else {
@@ -754,7 +1015,8 @@ fn load_local_state(data_dir: String) -> Result<Option<String>, String> {
             let conn = connect_local_db(&pointer_data_dir)?;
             return load_state_tables(&conn)?
                 .map(|mut state| {
-                    if let Some(settings) = state.get_mut("settings").and_then(Value::as_object_mut) {
+                    if let Some(settings) = state.get_mut("settings").and_then(Value::as_object_mut)
+                    {
                         settings.insert("dataPath".to_string(), Value::String(pointer_data_dir));
                     }
                     json_text(&state)
@@ -769,7 +1031,11 @@ fn load_local_state(data_dir: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn load_local_records(data_dir: String, kind: String, limit: Option<i64>) -> Result<String, String> {
+fn load_local_records(
+    data_dir: String,
+    kind: String,
+    limit: Option<i64>,
+) -> Result<String, String> {
     let conn = connect_local_db(&data_dir)?;
     let table = table_for_record_kind(&kind)?;
     let value = load_payload_array_limited(&conn, table, limit.unwrap_or(500).clamp(1, 5000))?;
@@ -780,23 +1046,81 @@ fn load_local_records(data_dir: String, kind: String, limit: Option<i64>) -> Res
 fn load_local_home_data(data_dir: String, date: String, user_id: String) -> Result<String, String> {
     let conn = connect_local_db(&data_dir)?;
     let mut value = Map::new();
-    value.insert("events".to_string(), load_events_for_date(&conn, &date, 200)?);
-    value.insert("dailyTemplates".to_string(), load_daily_templates(&conn, 500)?);
-    value.insert("boots".to_string(), load_payload_array_limited(&conn, "boots", 1)?);
-    value.insert("activities".to_string(), load_payload_array_limited(&conn, "activities", 1)?);
-    value.insert("friendRatings".to_string(), load_ratings_for_target(&conn, &user_id, 30)?);
+    value.insert(
+        "events".to_string(),
+        load_events_for_date(&conn, &date, 200)?,
+    );
+    value.insert(
+        "dailyTemplates".to_string(),
+        load_daily_templates(&conn, 500)?,
+    );
+    value.insert(
+        "boots".to_string(),
+        load_payload_array_limited(&conn, "boots", 1)?,
+    );
+    value.insert(
+        "activities".to_string(),
+        load_payload_array_limited(&conn, "activities", 1)?,
+    );
+    value.insert(
+        "friendRatings".to_string(),
+        load_ratings_for_target(&conn, &user_id, 30)?,
+    );
     json_text(&Value::Object(value))
 }
 
 #[tauri::command]
-fn load_local_schedule_data(data_dir: String, user_id: String, limit: Option<i64>) -> Result<String, String> {
+fn load_local_schedule_data(
+    data_dir: String,
+    user_id: String,
+    limit: Option<i64>,
+) -> Result<String, String> {
     let conn = connect_local_db(&data_dir)?;
     let bounded_limit = limit.unwrap_or(500).clamp(1, 5000);
     let mut value = Map::new();
-    value.insert("events".to_string(), load_payload_array_limited(&conn, "events", bounded_limit)?);
-    value.insert("dailyTemplates".to_string(), load_daily_templates(&conn, bounded_limit)?);
-    value.insert("friendRatings".to_string(), load_ratings_for_target(&conn, &user_id, bounded_limit)?);
+    value.insert(
+        "events".to_string(),
+        load_payload_array_limited(&conn, "events", bounded_limit)?,
+    );
+    value.insert(
+        "dailyTemplates".to_string(),
+        load_daily_templates(&conn, bounded_limit)?,
+    );
+    value.insert(
+        "friendRatings".to_string(),
+        load_ratings_for_target(&conn, &user_id, bounded_limit)?,
+    );
     json_text(&Value::Object(value))
+}
+
+#[tauri::command]
+fn load_local_schedule_month_data(
+    data_dir: String,
+    user_id: String,
+    month: String,
+) -> Result<String, String> {
+    let conn = connect_local_db(&data_dir)?;
+    let mut value = Map::new();
+    value.insert("events".to_string(), load_events_for_month(&conn, &month)?);
+    value.insert(
+        "dailyTemplates".to_string(),
+        load_daily_templates(&conn, 1000)?,
+    );
+    value.insert(
+        "friendRatings".to_string(),
+        load_ratings_for_target_month(&conn, &user_id, &month)?,
+    );
+    json_text(&Value::Object(value))
+}
+
+#[tauri::command]
+fn ensure_local_daily_instances(
+    data_dir: String,
+    user_id: String,
+    date: String,
+) -> Result<String, String> {
+    let mut conn = connect_local_db(&data_dir)?;
+    json_text(&ensure_daily_instances(&mut conn, &user_id, &date)?)
 }
 
 #[tauri::command]
@@ -804,39 +1128,73 @@ fn load_local_time_data(data_dir: String, limit: Option<i64>) -> Result<String, 
     let conn = connect_local_db(&data_dir)?;
     let bounded_limit = limit.unwrap_or(1000).clamp(1, 5000);
     let mut value = Map::new();
-    value.insert("activities".to_string(), load_payload_array_limited(&conn, "activities", bounded_limit)?);
-    value.insert("boots".to_string(), load_payload_array_limited(&conn, "boots", bounded_limit)?);
+    value.insert(
+        "activities".to_string(),
+        load_payload_array_limited(&conn, "activities", bounded_limit)?,
+    );
+    value.insert(
+        "boots".to_string(),
+        load_payload_array_limited(&conn, "boots", bounded_limit)?,
+    );
     json_text(&Value::Object(value))
 }
 
 #[tauri::command]
 fn load_local_time_dates(data_dir: String, limit: Option<i64>) -> Result<String, String> {
     let conn = connect_local_db(&data_dir)?;
-    json_text(&load_time_dates(&conn, limit.unwrap_or(5000).clamp(1, 20000))?)
+    json_text(&load_time_dates(
+        &conn,
+        limit.unwrap_or(5000).clamp(1, 20000),
+    )?)
 }
 
 #[tauri::command]
-fn load_local_time_day_data(data_dir: String, date: String, limit: Option<i64>) -> Result<String, String> {
+fn load_local_time_day_data(
+    data_dir: String,
+    date: String,
+    limit: Option<i64>,
+) -> Result<String, String> {
     let conn = connect_local_db(&data_dir)?;
     let bounded_limit = limit.unwrap_or(1000).clamp(1, 5000);
     let mut value = Map::new();
-    value.insert("activities".to_string(), load_time_payloads_for_date(&conn, "activities", &date, bounded_limit)?);
-    value.insert("boots".to_string(), load_time_payloads_for_date(&conn, "boots", &date, bounded_limit)?);
+    value.insert(
+        "activities".to_string(),
+        load_time_payloads_for_date(&conn, "activities", &date, bounded_limit)?,
+    );
+    value.insert(
+        "boots".to_string(),
+        load_time_payloads_for_date(&conn, "boots", &date, bounded_limit)?,
+    );
     json_text(&Value::Object(value))
 }
 
 #[tauri::command]
-fn load_local_friend_rating_data(data_dir: String, user_id: String, limit: Option<i64>) -> Result<String, String> {
+fn load_local_friend_rating_data(
+    data_dir: String,
+    user_id: String,
+    limit: Option<i64>,
+) -> Result<String, String> {
     let conn = connect_local_db(&data_dir)?;
     let bounded_limit = limit.unwrap_or(500).clamp(1, 5000);
     let mut value = Map::new();
-    value.insert("received".to_string(), load_ratings_for_target(&conn, &user_id, bounded_limit)?);
-    value.insert("given".to_string(), load_ratings_by_rater(&conn, &user_id, bounded_limit)?);
+    value.insert(
+        "received".to_string(),
+        load_ratings_for_target(&conn, &user_id, bounded_limit)?,
+    );
+    value.insert(
+        "given".to_string(),
+        load_ratings_by_rater(&conn, &user_id, bounded_limit)?,
+    );
     json_text(&Value::Object(value))
 }
 
 #[tauri::command]
-fn save_local_record(data_dir: String, kind: String, record_json: String, user_id: String) -> Result<(), String> {
+fn save_local_record(
+    data_dir: String,
+    kind: String,
+    record_json: String,
+    user_id: String,
+) -> Result<(), String> {
     let mut conn = connect_local_db(&data_dir)?;
     let payload = serde_json::from_str::<Value>(&record_json).map_err(|err| err.to_string())?;
     upsert_local_record(&mut conn, &kind, &user_id, &payload)
@@ -879,7 +1237,11 @@ fn data_dir_status(data_dir: String) -> Result<DataDirStatus, String> {
 }
 
 #[tauri::command]
-fn migrate_data_dir(from_data_dir: String, to_data_dir: String, overwrite: bool) -> Result<(), String> {
+fn migrate_data_dir(
+    from_data_dir: String,
+    to_data_dir: String,
+    overwrite: bool,
+) -> Result<(), String> {
     let from = resolve_data_dir(&from_data_dir)?;
     let to = resolve_data_dir(&to_data_dir)?;
     if from == to {
@@ -903,8 +1265,11 @@ fn migrate_data_dir(from_data_dir: String, to_data_dir: String, overwrite: bool)
         }
         let conn = Connection::open(&to_db).map_err(|err| err.to_string())?;
         init_local_db(&conn)?;
-        conn.execute("attach database ? as olddb", params![from_db.to_string_lossy().to_string()])
-            .map_err(|err| err.to_string())?;
+        conn.execute(
+            "attach database ? as olddb",
+            params![from_db.to_string_lossy().to_string()],
+        )
+        .map_err(|err| err.to_string())?;
         for table in [
             "app_state",
             "app_meta",
@@ -916,8 +1281,11 @@ fn migrate_data_dir(from_data_dir: String, to_data_dir: String, overwrite: bool)
             "friend_requests",
             "friend_ratings",
         ] {
-            conn.execute(&format!("insert or ignore into {table} select * from olddb.{table}"), [])
-                .map_err(|err| err.to_string())?;
+            conn.execute(
+                &format!("insert or ignore into {table} select * from olddb.{table}"),
+                [],
+            )
+            .map_err(|err| err.to_string())?;
         }
         conn.execute("detach database olddb", [])
             .map_err(|err| err.to_string())?;
@@ -1004,6 +1372,24 @@ fn read_evidence_image_data_url(file_path: String, mime_type: String) -> Result<
 }
 
 #[tauri::command]
+fn delete_evidence_image(data_dir: String, file_path: String) -> Result<(), String> {
+    if file_path.trim().is_empty() {
+        return Ok(());
+    }
+    let path = PathBuf::from(file_path);
+    if !path.exists() {
+        return Ok(());
+    }
+    let evidence_dir = resolve_data_dir(&data_dir)?.join("evidence");
+    let evidence_root = evidence_dir.canonicalize().map_err(|err| err.to_string())?;
+    let target = path.canonicalize().map_err(|err| err.to_string())?;
+    if !target.starts_with(&evidence_root) {
+        return Err("evidence image path is outside data evidence directory".to_string());
+    }
+    fs::remove_file(target).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn get_default_data_dir() -> Result<String, String> {
     Ok(default_data_dir()?.to_string_lossy().to_string())
 }
@@ -1021,14 +1407,14 @@ fn get_system_username() -> Option<String> {
 fn choose_data_dir(current_dir: String) -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
     {
-        use windows::core::{HSTRING, HRESULT};
+        use windows::core::{HRESULT, HSTRING};
         use windows::Win32::System::Com::{
             CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
             COINIT_APARTMENTTHREADED,
         };
         use windows::Win32::UI::Shell::{
-            FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH,
-            FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS,
+            FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+            FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
         };
 
         const ERROR_CANCELLED: HRESULT = HRESULT(0x800704C7u32 as i32);
@@ -1036,15 +1422,19 @@ fn choose_data_dir(current_dir: String) -> Result<Option<String>, String> {
         unsafe {
             let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
             let result = (|| -> windows::core::Result<Option<String>> {
-                let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+                let dialog: IFileOpenDialog =
+                    CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
                 let options = dialog.GetOptions()?;
-                dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST)?;
+                dialog.SetOptions(
+                    options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST,
+                )?;
                 dialog.SetTitle(&HSTRING::from("选择 DayNeko 数据目录"))?;
 
                 let current_path = PathBuf::from(current_dir.trim());
                 if current_path.exists() {
                     let current = HSTRING::from(current_path.to_string_lossy().as_ref());
-                    let folder: windows::core::Result<IShellItem> = SHCreateItemFromParsingName(&current, None);
+                    let folder: windows::core::Result<IShellItem> =
+                        SHCreateItemFromParsingName(&current, None);
                     if let Ok(folder) = folder {
                         let _ = dialog.SetFolder(&folder);
                     }
@@ -1197,6 +1587,8 @@ pub fn run() {
             load_local_records,
             load_local_home_data,
             load_local_schedule_data,
+            load_local_schedule_month_data,
+            ensure_local_daily_instances,
             load_local_time_data,
             load_local_time_dates,
             load_local_time_day_data,
@@ -1206,7 +1598,8 @@ pub fn run() {
             data_dir_status,
             migrate_data_dir,
             save_evidence_image,
-            read_evidence_image_data_url
+            read_evidence_image_data_url,
+            delete_evidence_image
         ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "显示 DayNeko", true, None::<&str>)?;
@@ -1259,4 +1652,83 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("failed to run DayNeko");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn daily_generation_keeps_existing_database_event() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        init_local_db(&conn).unwrap();
+        let template = json!({
+            "id": "daily-1",
+            "userId": "user-1",
+            "title": "Read",
+            "description": "",
+            "date": "2026-06-01",
+            "repeatDaily": true,
+            "isTemplate": true,
+            "completedDates": [],
+            "evidence": [],
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z"
+        });
+        conn.execute(
+            "insert into daily_templates (id, user_id, payload, updated_at) values (?, ?, ?, ?)",
+            params![
+                "daily-1",
+                "user-1",
+                json_text(&template).unwrap(),
+                "2026-06-01T00:00:00.000Z"
+            ],
+        )
+        .unwrap();
+        let existing = json!({
+            "id": "daily-1:2026-06-20",
+            "userId": "user-1",
+            "title": "Read",
+            "description": "",
+            "date": "2026-06-20",
+            "repeatDaily": false,
+            "templateId": "daily-1",
+            "completedDates": ["2026-06-20"],
+            "evidence": [{"id": "photo-1", "dataUrl": "photo.jpg"}],
+            "createdAt": "2026-06-20T01:00:00.000Z",
+            "updatedAt": "2026-06-20T02:00:00.000Z"
+        });
+        conn.execute(
+            "insert into events (id, user_id, payload, updated_at) values (?, ?, ?, ?)",
+            params![
+                "daily-1:2026-06-20",
+                "user-1",
+                json_text(&existing).unwrap(),
+                "2026-06-20T02:00:00.000Z"
+            ],
+        )
+        .unwrap();
+
+        let created_today = ensure_daily_instances(&mut conn, "user-1", "2026-06-20").unwrap();
+        assert_eq!(created_today, Value::Array(Vec::new()));
+        let stored: String = conn
+            .query_row(
+                "select payload from events where id = ?",
+                params!["daily-1:2026-06-20"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), existing);
+
+        let created_next_day = ensure_daily_instances(&mut conn, "user-1", "2026-06-21").unwrap();
+        assert_eq!(created_next_day.as_array().unwrap().len(), 1);
+        let queued: i64 = conn
+            .query_row(
+                "select count(*) from dirty_queue where id = ?",
+                params!["event:daily-1:2026-06-21"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(queued, 1);
+    }
 }

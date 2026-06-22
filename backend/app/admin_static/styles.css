@@ -16,13 +16,9 @@
 }
 
 body {
-  min-width: 1024px;
   min-height: 100vh;
   margin: 0;
-  background:
-    radial-gradient(circle at 12% 12%, rgba(84, 214, 176, 0.24), transparent 28rem),
-    radial-gradient(circle at 92% 16%, rgba(255, 205, 128, 0.25), transparent 24rem),
-    linear-gradient(135deg, #f5f1e7, #eef6f2 55%, #f8f6ef);
+  background: linear-gradient(135deg, #f5f1e7, #eef6f2 55%, #f8f6ef);
 }
 
 button,
@@ -52,7 +48,8 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -60,6 +57,15 @@ select {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.74);
   outline: none;
+}
+
+textarea {
+  width: 100%;
+  min-height: 360px;
+  padding: 12px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  line-height: 1.5;
 }
 
 .shell {
@@ -276,7 +282,8 @@ nav button:hover,
   overflow-wrap: anywhere;
 }
 
-.row pre {
+.row pre,
+.record-editor {
   max-height: 140px;
   overflow: auto;
   margin: 0;
@@ -288,9 +295,43 @@ nav button:hover,
   white-space: pre-wrap;
 }
 
+.record-editor {
+  width: 100%;
+  min-height: 150px;
+  max-height: none;
+  border-color: rgba(22, 33, 27, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.record-editor:focus {
+  border-color: rgba(84, 214, 176, 0.65);
+  box-shadow: 0 0 0 3px rgba(84, 214, 176, 0.16);
+}
+
 .danger {
   color: #fff;
   background: var(--danger);
+}
+
+.soft {
+  color: var(--ink);
+  background: rgba(84, 214, 176, 0.18);
+}
+
+.row-actions,
+.request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.inline-edit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
 }
 
 .table {
@@ -320,4 +361,184 @@ nav button:hover,
 .empty {
   margin: 0;
   color: var(--muted);
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(10, 16, 13, 0.42);
+}
+
+.modal.open {
+  display: flex;
+}
+
+.modal-panel {
+  display: grid;
+  gap: 14px;
+  width: min(920px, 100%);
+  max-height: min(820px, 92vh);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 28px 90px rgba(20, 31, 28, 0.24);
+}
+
+.modal-panel header,
+.modal-panel footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.modal-panel header span {
+  color: #40584e;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.modal-panel h2 {
+  margin: 4px 0;
+}
+
+.modal-panel small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.ghost-icon {
+  color: var(--ink);
+  background: rgba(20, 31, 28, 0.06);
+}
+
+@media (max-width: 840px) {
+  .shell {
+    display: block;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .brand {
+    justify-content: space-between;
+  }
+
+  nav {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  nav button,
+  .ghost {
+    flex: 0 0 auto;
+    text-align: center;
+  }
+
+  .ghost {
+    margin-top: 0;
+  }
+
+  .content {
+    padding: 14px;
+  }
+
+  .hero,
+  .panel-head,
+  .auth-card,
+  .auth-card form,
+  .modal-panel header,
+  .modal-panel footer {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filters,
+  .filters > *,
+  .panel-head > input {
+    width: 100%;
+  }
+
+  .kind-row,
+  .row,
+  .row.three,
+  .admin-user-row {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-edit {
+    grid-template-columns: 1fr;
+  }
+
+  .row-actions,
+  .request-actions {
+    justify-content: stretch;
+  }
+
+  .row-actions > *,
+  .request-actions > * {
+    flex: 1 1 120px;
+  }
+
+  .pager {
+    justify-content: stretch;
+  }
+
+  .pager button {
+    flex: 1;
+  }
+
+  .modal {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .modal-panel {
+    max-height: 100%;
+    overflow: auto;
+  }
+
+  textarea {
+    min-height: 52vh;
+  }
+
+  .record-editor {
+    min-height: 220px;
+  }
+}
+
+@media (max-width: 520px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .stat strong {
+    font-size: 24px;
+  }
+
+  button {
+    width: 100%;
+  }
 }

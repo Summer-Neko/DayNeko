@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "dayneko.db"
+MEDIA_ROOT = ROOT / "media"
 STATIC_ROOT = Path(__file__).resolve().parent / "admin_static"
 
 router = APIRouter()
@@ -31,6 +32,14 @@ class AdminLoginPayload(BaseModel):
 class UserUpdatePayload(BaseModel):
     name: str | None = None
     handle: str | None = None
+
+
+class RecordUpdatePayload(BaseModel):
+    payload: dict[str, Any]
+
+
+class FriendRequestUpdatePayload(BaseModel):
+    status: str
 
 
 def connect() -> sqlite3.Connection:
@@ -70,6 +79,14 @@ def ensure_admin_db() -> None:
             );
             """
         )
+        conn.execute("create index if not exists idx_admin_sessions_expires on admin_sessions(expires_at)")
+        tables = {row["name"] for row in conn.execute("select name from sqlite_master where type = 'table'").fetchall()}
+        if "friend_requests" in tables:
+            conn.execute("create index if not exists idx_admin_requests_from on friend_requests(from_user_id)")
+            conn.execute("create index if not exists idx_admin_requests_to on friend_requests(to_user_id)")
+        if "friendships" in tables:
+            conn.execute("create index if not exists idx_admin_friendships_a on friendships(user_a)")
+            conn.execute("create index if not exists idx_admin_friendships_b on friendships(user_b)")
 
 
 def admin_configured(conn: sqlite3.Connection) -> bool:
@@ -116,6 +133,33 @@ def payload_references_user(payload: dict[str, Any], user_id: str) -> bool:
 
 def page_bounds(limit: int, offset: int) -> tuple[int, int]:
     return max(1, min(limit, 100)), max(0, offset)
+
+
+def delete_media_file(relative_path: str) -> None:
+    target = (MEDIA_ROOT / relative_path).resolve()
+    media_root = MEDIA_ROOT.resolve()
+    if not str(target).startswith(str(media_root)):
+        return
+    try:
+        target.unlink()
+    except FileNotFoundError:
+        return
+
+
+def delete_media_rows(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> None:
+    for row in rows:
+        delete_media_file(row["file_path"])
+        conn.execute("delete from media_assets where id = ?", (row["id"],))
+
+
+def delete_media_for_user(conn: sqlite3.Connection, user_id: str) -> None:
+    rows = conn.execute("select id, file_path from media_assets where owner_user_id = ?", (user_id,)).fetchall()
+    delete_media_rows(conn, rows)
+
+
+def delete_media_for_record(conn: sqlite3.Connection, record_id: str) -> None:
+    rows = conn.execute("select id, file_path from media_assets where record_id = ?", (record_id,)).fetchall()
+    delete_media_rows(conn, rows)
 
 
 @router.get("/admin")
@@ -179,12 +223,16 @@ def admin_summary(authorization: str | None = Header(default=None)) -> dict[str,
     with connect() as conn:
         users = conn.execute("select count(*) as value from users").fetchone()["value"]
         records = conn.execute("select count(*) as value from records").fetchone()["value"]
+        media = conn.execute("select count(*) as value from media_assets").fetchone()["value"]
+        media_size = conn.execute("select coalesce(sum(size), 0) as value from media_assets").fetchone()["value"]
         friendships = conn.execute("select count(*) as value from friendships").fetchone()["value"]
         requests = conn.execute("select count(*) as value from friend_requests").fetchone()["value"]
         by_kind = [dict(row) for row in conn.execute("select kind, count(*) as count from records group by kind order by count desc").fetchall()]
     return {
         "users": users,
         "records": records,
+        "mediaAssets": media,
+        "mediaBytes": media_size,
         "friendships": friendships,
         "friendRequests": requests,
         "recordsByKind": by_kind,
@@ -247,14 +295,27 @@ def admin_update_user(user_id: str, payload: UserUpdatePayload, authorization: s
 def admin_delete_user(user_id: str, authorization: str | None = Header(default=None)) -> dict[str, str]:
     require_admin(authorization)
     with connect() as conn:
-        record_rows = conn.execute("select id, user_id, payload from records").fetchall()
         record_ids = [
             row["id"]
-            for row in record_rows
-            if row["user_id"] == user_id or payload_references_user(parse_payload(row["payload"]), user_id)
+            for row in conn.execute(
+                """
+                select id from records
+                where user_id = ?
+                   or json_extract(payload, '$.id') = ?
+                   or json_extract(payload, '$.userId') = ?
+                   or json_extract(payload, '$.targetUserId') = ?
+                   or json_extract(payload, '$.raterFriendId') = ?
+                   or json_extract(payload, '$.fromUserId') = ?
+                   or json_extract(payload, '$.toUserId') = ?
+                """,
+                (user_id, user_id, user_id, user_id, user_id, user_id, user_id),
+            ).fetchall()
         ]
         if record_ids:
+            for record_id in record_ids:
+                delete_media_for_record(conn, record_id)
             conn.executemany("delete from records where id = ?", [(record_id,) for record_id in record_ids])
+        delete_media_for_user(conn, user_id)
         conn.execute("delete from friend_requests where from_user_id = ? or to_user_id = ?", (user_id, user_id))
         conn.execute("delete from friendships where user_a = ? or user_b = ?", (user_id, user_id))
         conn.execute("delete from users where id = ?", (user_id,))
@@ -319,8 +380,24 @@ def admin_records(
 def admin_delete_record(record_id: str, authorization: str | None = Header(default=None)) -> dict[str, str]:
     require_admin(authorization)
     with connect() as conn:
+        delete_media_for_record(conn, record_id)
         conn.execute("delete from records where id = ?", (record_id,))
     return {"status": "deleted"}
+
+
+@router.patch("/admin/api/records/{record_id}")
+def admin_update_record(record_id: str, payload: RecordUpdatePayload, authorization: str | None = Header(default=None)) -> dict[str, str]:
+    require_admin(authorization)
+    now = utc_now()
+    with connect() as conn:
+        row = conn.execute("select id from records where id = ?", (record_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="record not found")
+        conn.execute(
+            "update records set payload = ?, updated_at = ? where id = ?",
+            (json.dumps(payload.payload, ensure_ascii=False), now, record_id),
+        )
+    return {"status": "updated"}
 
 
 @router.get("/admin/api/friend-requests")
@@ -331,6 +408,16 @@ def admin_friend_requests(limit: int = 50, offset: int = 0, authorization: str |
         total = conn.execute("select count(*) as value from friend_requests").fetchone()["value"]
         rows = conn.execute("select * from friend_requests order by updated_at desc limit ? offset ?", (limit, offset)).fetchall()
     return {"items": [dict(row) for row in rows], "limit": limit, "offset": offset, "total": total}
+
+
+@router.patch("/admin/api/friend-requests/{request_id}")
+def admin_update_friend_request(request_id: str, payload: FriendRequestUpdatePayload, authorization: str | None = Header(default=None)) -> dict[str, str]:
+    require_admin(authorization)
+    if payload.status not in {"pending", "accepted", "rejected"}:
+        raise HTTPException(status_code=400, detail="invalid friend request status")
+    with connect() as conn:
+        conn.execute("update friend_requests set status = ?, updated_at = ? where id = ?", (payload.status, utc_now(), request_id))
+    return {"status": "updated"}
 
 
 @router.delete("/admin/api/friend-requests/{request_id}")
